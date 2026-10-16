@@ -31,6 +31,29 @@ Most tools need no key. When you enable the plugin, Claude Code asks for optiona
 | OpenAlex API key | Your own research-citations quota |
 | PageSpeed Insights API key | Your own PageSpeed quota |
 
+## External services
+
+The MCP server runs on your computer and calls these services only when you use the matching tool. It sends the website, domain, brand name or query you asked about; your own keys go only to their own service.
+
+| Service | Used by | Sent |
+|---|---|---|
+| AlchemyAgent API (api.alchemyagent.ai) | PageSpeed, Core Web Vitals trend, security headers, Wikidata, AI crawler IP lists | URL or domain |
+| The website you ask about | crawler, render, schema, agent-readiness, security and alerts checks | ordinary page requests |
+| Google PageSpeed Insights (with your own key) | `pagespeed_check` | URL, your key |
+| Google Search Console API, Google OAuth | `gsc_*`, `brand_alerts` | your Google sign-in or service account; property and date range |
+| Bing Webmaster Tools API | `bing_webmaster` | your key, site URL |
+| Brave Search API | `brave_rank` | your key, search queries |
+| Wikipedia / Wikimedia APIs | `wikipedia_presence` | domain, article title |
+| Tranco, Open PageRank | `authority_check` | domains (Open PageRank: your key) |
+| OpenAlex | `research_citations` | brand name, domain (your key if set) |
+| GDELT DOC API | `news_mentions` | brand name |
+| Google News RSS, your Google Alerts RSS feeds | `brand_alerts` | brand name |
+| Hacker News Search (Algolia), Stack Exchange API | `community_mentions` | brand name, domain |
+| OpenStreetMap Nominatim | `osm_listing` | business name, location |
+| Common Crawl index, Internet Archive Wayback Machine | `common_crawl_check`, `wayback_history` | domain or URL |
+
+Saved on your computer: the Google refresh token (`~/.alchemyagent/google-token.json`, readable only by you) and the brand-alerts history (`~/.alchemyagent/alerts/`). Nothing else is stored.
+
 ## Privacy
 
 Checks run on your computer. A few use AlchemyAgent's free API (api.alchemyagent.ai) for PageSpeed, Chrome UX Report, Mozilla Observatory and Wikidata lookups: we receive the website you ask about, and cache public-site results for up to 12 hours. See the [privacy policy](https://alchemyleads.com/privacy-policy/#alchemyagent-free-tools).
