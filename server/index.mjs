@@ -112,12 +112,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve) => {
+    return new Promise((resolve2) => {
       const json4 = serializeMessage(message);
       if (this._stdout.write(json4)) {
-        resolve();
+        resolve2();
       } else {
-        this._stdout.once("drain", resolve);
+        this._stdout.once("drain", resolve2);
       }
     });
   }
@@ -172,7 +172,7 @@ function summarize(raw, strategy) {
   const hasMetrics = (x) => x?.metrics && Object.keys(x.metrics).length > 0 && x.origin_fallback !== true;
   const src = hasMetrics(page) ? page : origin?.metrics ? origin : null;
   const scope = src === page && src ? "page" : src ? "origin" : "none";
-  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt2]]) => ({ name, value: fmt2(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
+  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt4]]) => ({ name, value: fmt4(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
   const audits = lh.audits ?? {};
   const lab = LAB_METRICS.filter((k) => audits[k]?.displayValue).map((k) => ({ name: audits[k].title, value: audits[k].displayValue }));
   const opportunities = Object.values(audits).filter((a) => a?.details?.type === "opportunity" && (a.details.overallSavingsMs ?? 0) >= 100 && (a.score ?? 1) < 0.9).sort((a, b) => b.details.overallSavingsMs - a.details.overallSavingsMs).slice(0, 5).map((a) => ({ title: a.title, savings: `~${(a.details.overallSavingsMs / 1e3).toFixed(1)}s` }));
@@ -1036,7 +1036,7 @@ async function renderCheck(url, f = fetch) {
   const main = body.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i);
   const headings = [...body.matchAll(/<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi)].map((m) => ({ level: Number(m[1]), text: textOf(m[2]).slice(0, 120) })).filter((h) => h.text);
   const imgs = [...body.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
-  const attr = (re) => decode(html.match(re)?.[1] ?? "").trim();
+  const attr2 = (re) => decode(html.match(re)?.[1] ?? "").trim();
   const w = words(text);
   const fw = frameworks(html);
   const shell = w < 150 && (scriptKb > 50 || /<div[^>]+id=["'](root|app|__next|__nuxt|svelte)["'][^>]*>\s*<\/div>/i.test(html));
@@ -1051,15 +1051,15 @@ async function renderCheck(url, f = fetch) {
     mainWords: main ? words(textOf(main[2])) : null,
     noscriptWords: words(noscript),
     title: textOf(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ""),
-    metaDescription: attr(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i) || attr(/<meta\b[^>]*content=["']([^"']*)["'][^>]*name=["']description["']/i),
+    metaDescription: attr2(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i) || attr2(/<meta\b[^>]*content=["']([^"']*)["'][^>]*name=["']description["']/i),
     h1: headings.filter((h) => h.level === 1).map((h) => h.text),
     headings,
     links: (body.match(/<a\b[^>]*href=/gi) ?? []).length,
     images: imgs.length,
     imagesNoAlt: imgs.filter((t) => !/\salt=["'][^"']+["']/i.test(t)).length,
     jsonLdBlocks: (html.match(/application\/ld\+json/gi) ?? []).length,
-    lang: attr(/<html\b[^>]*\slang=["']([^"']+)["']/i),
-    canonical: attr(/<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i),
+    lang: attr2(/<html\b[^>]*\slang=["']([^"']+)["']/i),
+    canonical: attr2(/<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i),
     frameworks: fw,
     shell,
     gtm: /googletagmanager\.com\/gtm\.js|GTM-[A-Z0-9]{4,}/.test(html),
@@ -1293,8 +1293,8 @@ async function wikipediaCheck(domain, articleUrl, f = fetch, langs = LANGS) {
     const start = new Date(end);
     start.setUTCDate(1);
     start.setUTCMonth(start.getUTCMonth() - 11);
-    const fmt2 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
-    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt2(start)}/${fmt2(end)}`);
+    const fmt4 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
+    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt4(start)}/${fmt4(end)}`);
     out.pageviews = pv ? { title: decodeURIComponent(m[2]).replace(/_/g, " "), lang: m[1], months: (pv.items ?? []).map((i) => ({ month: String(i.timestamp).slice(0, 6), views: Number(i.views) || 0 })) } : null;
   }
   return out;
@@ -1802,7 +1802,7 @@ async function startConnect(creds, f = fetch, open = openBrowser) {
     code_challenge_method: "S256",
     state
   });
-  const done = new Promise((resolve, reject) => {
+  const done = new Promise((resolve2, reject) => {
     const timer = setTimeout(() => {
       server2.close();
       pending = null;
@@ -1835,7 +1835,7 @@ async function startConnect(creds, f = fetch, open = openBrowser) {
         await chmod(TOKEN_FILE, 384);
         cached = { token: body.access_token, exp: Date.now() + (body.expires_in - 60) * 1e3, key: creds.clientId };
         finish(200, "Search Console is connected. You can close this tab and go back to Claude.");
-        resolve("ok");
+        resolve2("ok");
       } catch (e) {
         finish(500, "Couldn't finish sign-in. Go back to Claude and try again.");
         reject(e);
@@ -1868,8 +1868,8 @@ async function listSites(creds, f = fetch) {
 function matchProperty(sites, input) {
   const exact = sites.find((s) => s.siteUrl === input);
   if (exact) return exact.siteUrl;
-  const host3 = input.replace(/^sc-domain:/, "").replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
-  return sites.find((s) => s.siteUrl === `sc-domain:${host3}`)?.siteUrl ?? sites.find((s) => s.siteUrl.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "") === host3)?.siteUrl ?? null;
+  const host4 = input.replace(/^sc-domain:/, "").replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
+  return sites.find((s) => s.siteUrl === `sc-domain:${host4}`)?.siteUrl ?? sites.find((s) => s.siteUrl.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "") === host4)?.siteUrl ?? null;
 }
 var ymd2 = (d) => d.toISOString().slice(0, 10);
 function dateRange(days, endOffset = 2) {
@@ -2188,9 +2188,9 @@ async function checkAlerts(opts, f = fetch) {
 }
 function notifyDesktop(title, body) {
   if (platform2() !== "darwin") return;
-  const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
+  const esc2 = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
   try {
-    spawn2("osascript", ["-e", `display notification "${esc(body)}" with title "${esc(title)}"`], { stdio: "ignore", detached: true }).unref();
+    spawn2("osascript", ["-e", `display notification "${esc2(body)}" with title "${esc2(title)}"`], { stdio: "ignore", detached: true }).unref();
   } catch {
   }
 }
@@ -2277,7 +2277,7 @@ var BLOCKED = (s) => s === 403 || s === 429 || s === 503;
 var iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
 async function logReport(f, token, input, days = 30) {
   const zone = await findZone(f, token, input);
-  const host3 = hostOf2(input);
+  const host4 = hostOf2(input);
   const now = /* @__PURE__ */ new Date();
   const windows = [...new Set([days, 30, 14, 7, 3, 1].filter((d) => d <= days))];
   let used = 0, base = null, lastErr = "";
@@ -2332,15 +2332,15 @@ async function logReport(f, token, input, days = 30) {
   let rum = null, rumNote;
   if (zone.accountId) {
     const s = iso(new Date(now.getTime() - used * 864e5));
-    const r = await gql(f, token, `{viewer{accounts(filter:{accountTag:"${zone.accountId}"}){rumPageloadEventsAdaptiveGroups(limit:1,filter:{datetime_geq:"${s}",datetime_lt:"${iso(now)}",requestHost:"${host3}"}){count sum{visits}}}}}`).catch(() => ({ error: "unavailable" }));
+    const r = await gql(f, token, `{viewer{accounts(filter:{accountTag:"${zone.accountId}"}){rumPageloadEventsAdaptiveGroups(limit:1,filter:{datetime_geq:"${s}",datetime_lt:"${iso(now)}",requestHost:"${host4}"}){count sum{visits}}}}}`).catch(() => ({ error: "unavailable" }));
     const g = r.data?.viewer?.accounts?.[0]?.rumPageloadEventsAdaptiveGroups?.[0];
     if (g && (Number(g.count) || Number(g.sum?.visits))) rum = { visits: Number(g.sum?.visits) || 0, pageloads: Number(g.count) || 0 };
-    else rumNote = r.error ? "Cloudflare Web Analytics wasn't readable with this token (add Account > Account Analytics > Read)." : `Cloudflare Web Analytics has no data for ${host3} (it's off or uses a different hostname).`;
+    else rumNote = r.error ? "Cloudflare Web Analytics wasn't readable with this token (add Account > Account Analytics > Read)." : `Cloudflare Web Analytics has no data for ${host4} (it's off or uses a different hostname).`;
   }
   const num2 = (x) => Number(x?.[0]?.count) || 0;
   return {
     zone,
-    host: host3,
+    host: host4,
     days: used,
     requested: days,
     from: iso(new Date(now.getTime() - used * 864e5)).slice(0, 10),
@@ -2408,6 +2408,478 @@ function logMarkdown(r, analytics) {
   return L.join("\n");
 }
 
+// src/entitymap.ts
+var UA9 = "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)";
+var CORE_TYPES = /* @__PURE__ */ new Set(["Concept", "ProprietaryTerm", "Methodology", "Metric", "Taxonomy", "Person", "Organization", "SoftwareProduct", "PhysicalProduct", "Service", "Platform", "Place", "Event", "Standard", "Regulation"]);
+var TIER1 = ["INSTANCE_OF", "PART_OF", "INCLUDES", "DEPENDS_ON", "REQUIRES", "MEASURES", "PRODUCED_BY", "REGULATED_BY", "AUTHORED_BY", "AFFILIATED_WITH", "COVERS"];
+var TIER2 = ["RELATES_TO", "PRECEDES", "ENABLES", "PREVENTS", "CONFLICTS_WITH", "DESCRIBED_BY", "OFFERS"];
+var TIER3 = ["IMPROVES", "DEGRADES", "LEADS_TO", "SUITED_FOR", "TARGETS", "ACHIEVES"];
+var STANDARD = /* @__PURE__ */ new Set([...TIER1, ...TIER2, ...TIER3]);
+var STATUSES = /* @__PURE__ */ new Set(["self-declared", "generator-draft", "third-party-verified"]);
+var str = (v) => typeof v === "string" && v.trim().length > 0;
+var host3 = (u) => {
+  try {
+    return new URL(u).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+};
+function validateEntityMap(doc, now = Date.now()) {
+  const issues = [];
+  const err = (path, msg2) => issues.push({ level: "error", path, msg: msg2 });
+  const warn = (path, msg2) => issues.push({ level: "warning", path, msg: msg2 });
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    err("root", "The file isn't a JSON object.");
+    return { issues, entities: 0, chunks: 0, relations: 0 };
+  }
+  if (doc.version !== "1.0") err("version", `Must be "1.0" (found ${JSON.stringify(doc.version)}).`);
+  if (doc.schema !== "https://entitymap.org/spec/v1.0") err("schema", 'Must be "https://entitymap.org/spec/v1.0".');
+  const pub = doc.publisher;
+  const pubName = typeof pub?.name === "string" ? pub.name : "";
+  if (!str(pubName)) err("publisher.name", "Missing. It's the brand name AI tools will use for attribution.");
+  else if (/^[a-z0-9-]+\.[a-z.]{2,}$/i.test(pubName.trim())) err("publisher.name", `"${pubName}" looks like a domain. Use the canonical brand name.`);
+  if (!str(pub?.url)) err("publisher.url", "Missing the publisher's canonical URL.");
+  if (!str(doc.generated) || isNaN(Date.parse(doc.generated))) err("generated", "Missing or not an ISO 8601 timestamp.");
+  else if (now - Date.parse(doc.generated) > 30 * 864e5) warn("generated", `Last generated ${doc.generated.slice(0, 10)}, more than 30 days ago. Consumers treat that as possibly stale; rebuild after content changes.`);
+  if (doc.verificationStatus != null && !STATUSES.has(doc.verificationStatus)) err("verificationStatus", `Must be one of ${[...STATUSES].join(", ")}.`);
+  if (doc.verificationStatus === "third-party-verified" && !doc.certification) warn("verificationStatus", '"third-party-verified" without a certification field is treated as "self-declared".');
+  if (doc.certification?.url) {
+    const m = /^https:\/\/entitymap\.org\/certified\/([^/]+)\/([0-9a-f]{32})$/.exec(String(doc.certification.url));
+    if (!m) err("certification.url", "Must look like https://entitymap.org/certified/{domain}/{32-hex token}.");
+    else if (m[1].toLowerCase() !== host3(String(pub?.url ?? ""))) err("certification.url", `Domain segment ${m[1]} doesn't match publisher.url's hostname.`);
+  }
+  const customPreds = new Set((doc.vocabulary?.predicates ?? []).map(String));
+  for (const p of customPreds) {
+    if (p !== p.toUpperCase()) err("vocabulary.predicates", `Custom predicate ${p} must be uppercase.`);
+    if (STANDARD.has(p)) err("vocabulary.predicates", `Custom predicate ${p} conflicts with a standard predicate.`);
+  }
+  const ents = Array.isArray(doc.entities) ? doc.entities : [];
+  if (!ents.length) err("entities", "Needs at least one entity.");
+  if (ents.length > 200 && !doc.shards) warn("entities", `${ents.length} entities. The spec says maps over 200 entities SHOULD be sharded.`);
+  const byId = /* @__PURE__ */ new Map();
+  const chunkIds = /* @__PURE__ */ new Set();
+  let chunks = 0, relations = 0, relatesTo = 0;
+  const pairs = /* @__PURE__ */ new Map();
+  ents.forEach((e, i) => {
+    const at = `entities[${i}]${str(e?.name) ? ` (${e.name})` : ""}`;
+    if (!str(e?.entityId)) err(at, "Missing entityId.");
+    else if (byId.has(e.entityId)) err(at, `Duplicate entityId ${e.entityId}.`);
+    else byId.set(e.entityId, e);
+    const t = String(e?.["@type"] ?? "");
+    if (!t) err(at, "Missing @type.");
+    else if (!CORE_TYPES.has(t) && !/^[a-z][\w-]*:[A-Z]\w*$/.test(t)) err(at, `@type "${t}" isn't a v1.0 core type or a namespaced custom type (e.g. "acme:MetricComponent").`);
+    if (!str(e?.name)) err(at, "Missing name.");
+    if (!str(e?.description)) err(at, "Missing description.");
+    if ((e?.status === "deprecated" || e?.status === "merged") && !str(e?.replacedBy)) err(at, `status "${e.status}" needs replacedBy.`);
+    if (t === "Concept" && !(Array.isArray(e?.sameAs) && e.sameAs.length)) warn(at, "Concept without sameAs. Linking Wikidata or Wikipedia helps AI tools match it to general knowledge.");
+    const hc = Array.isArray(e?.hasChunks) ? e.hasChunks : [];
+    if (!hc.length) err(at, "Needs at least one chunk in hasChunks.");
+    if (hc.length > 5) err(`${at}.hasChunks`, `${hc.length} chunks; the maximum is 5.`);
+    hc.forEach((c, j) => {
+      chunks++;
+      const cat = `${at}.hasChunks[${j}]`;
+      for (const k of ["chunkId", "text", "sourceUrl", "pageTitle", "publisher"]) if (!str(c?.[k])) err(cat, `Missing ${k}.`);
+      if (str(c?.chunkId)) {
+        if (chunkIds.has(c.chunkId)) err(cat, `Duplicate chunkId ${c.chunkId}.`);
+        chunkIds.add(c.chunkId);
+      }
+      if (str(c?.text) && c.text.length > 600) err(cat, `Text is ${c.text.length} characters; the maximum is 600.`);
+      if (str(c?.publisher) && pubName && c.publisher !== pubName) err(cat, `publisher "${c.publisher}" doesn't exactly match publisher.name "${pubName}" (case and spacing count).`);
+      if (str(c?.sourceUrl) && !/^https?:\/\//.test(c.sourceUrl)) err(cat, "sourceUrl must be an absolute URL.");
+    });
+  });
+  ents.forEach((e, i) => {
+    const at = `entities[${i}]${str(e?.name) ? ` (${e.name})` : ""}`;
+    const t = String(e?.["@type"] ?? "");
+    (Array.isArray(e?.relations) ? e.relations : []).forEach((r, k) => {
+      relations++;
+      const rat = `${at}.relations[${k}]`;
+      const p = String(r?.predicate ?? "");
+      if (!p) {
+        err(rat, "Missing predicate.");
+        return;
+      }
+      if (!STANDARD.has(p) && !customPreds.has(p)) err(rat, `Predicate ${p} isn't in the v1.0 vocabulary or declared in vocabulary.predicates.`);
+      if (!str(r?.targetName)) err(rat, "Missing targetName.");
+      if (TIER3.includes(p) && !str(r?.confidence)) err(rat, `${p} is an interpretive predicate and needs a confidence field.`);
+      if (p === "MEASURES" && t !== "Metric") err(rat, "MEASURES can only come from a Metric entity.");
+      if (p === "AFFILIATED_WITH" && t !== "Person") err(rat, "AFFILIATED_WITH can only come from a Person entity.");
+      if (p === "COVERS" && !["Concept", "ProprietaryTerm", "Taxonomy"].includes(t)) err(rat, "COVERS can only come from a Concept, ProprietaryTerm or Taxonomy entity.");
+      if (p === "RELATES_TO") relatesTo++;
+      if (str(r?.targetId)) {
+        if (!byId.has(r.targetId) && !/^https?:\/\//.test(r.targetId)) warn(rat, `targetId ${r.targetId} isn't an entity in this file.`);
+        const key = `${e?.entityId}>${r.targetId}`;
+        const set = pairs.get(key) ?? /* @__PURE__ */ new Set();
+        set.add(p);
+        pairs.set(key, set);
+      }
+    });
+  });
+  const has = (a, b, p) => pairs.get(`${a}>${b}`)?.has(p);
+  const seen = /* @__PURE__ */ new Set();
+  for (const key of pairs.keys()) {
+    const [a, b] = key.split(">");
+    const id = [a, b].sort().join("|");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (has(a, b, "PART_OF") && has(b, a, "INCLUDES") || has(a, b, "INCLUDES") && has(b, a, "PART_OF")) err(`${a} / ${b}`, "PART_OF and INCLUDES are declared in both directions. Inverses are implicit; keep one.");
+    for (const [x, y] of [["IMPROVES", "DEGRADES"], ["ENABLES", "PREVENTS"]]) {
+      if ((has(a, b, x) || has(b, a, x)) && (has(a, b, y) || has(b, a, y))) err(`${a} / ${b}`, `${x} and ${y} are both declared between the same pair.`);
+    }
+  }
+  if (relations >= 10 && relatesTo / relations > 0.2) warn("relations", `RELATES_TO is ${Math.round(relatesTo / relations * 100)}% of relations. It's the predicate of last resort; prefer a specific one where it fits.`);
+  if (doc.verificationStatus === "generator-draft") warn("verificationStatus", '"generator-draft": fine for unreviewed output. Switch to "self-declared" after a person has reviewed the map.');
+  return { issues, entities: ents.length, chunks, relations };
+}
+function checkHtml(html, pubName) {
+  const quotes = html.match(/<blockquote\b[^>]*>/gi) ?? [];
+  const withPub = quotes.filter((q) => /data-publisher=/i.test(q)).length;
+  const cites = (html.match(/<cite\b[^>]*>[\s\S]*?<\/cite>/gi) ?? []).map((c) => c.replace(/<[^>]+>/g, " "));
+  const citeOk = cites.filter((c) => c.toLowerCase().includes(`published by ${pubName}`.toLowerCase())).length;
+  return [
+    { ok: /<link\b[^>]*rel=["']?alternate["']?[^>]*application\/json|<link\b[^>]*application\/json[^>]*rel=["']?alternate/i.test(html), label: 'Links to entitymap.json with <link rel="alternate" type="application/json">' },
+    { ok: /<script\b[^>]*application\/ld\+json/i.test(html), label: "Embeds JSON-LD for entities" },
+    { ok: quotes.length > 0 && withPub === quotes.length, label: `data-publisher on every chunk blockquote (${withPub}/${quotes.length})` },
+    { ok: cites.length > 0 && citeOk === cites.length, label: `Visible "published by ${pubName}" in every <cite> (${citeOk}/${cites.length})` },
+    { ok: !/<meta\b[^>]*name=["']?robots["']?[^>]*noindex/i.test(html), label: "No noindex" }
+  ];
+}
+async function get3(f, url) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 2e4);
+  try {
+    const r = await f(url, { headers: { "user-agent": UA9, accept: "application/json, text/html;q=0.9" }, redirect: "follow", signal: ctl.signal });
+    return { status: r.status, text: await r.text() };
+  } catch {
+    return { status: 0, text: "" };
+  } finally {
+    clearTimeout(t);
+  }
+}
+async function entitymapCheck(input, f = fetch, jsonText) {
+  let origin = "";
+  try {
+    origin = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`).origin;
+  } catch {
+  }
+  const jsonUrl = origin ? `${origin}/entitymap.json` : "(pasted JSON)";
+  let text = jsonText, status;
+  if (!text) {
+    const r = await get3(f, jsonUrl);
+    status = r.status;
+    if (r.status !== 200) return { jsonUrl, found: false, status: r.status, entities: 0, chunks: 0, relations: 0, issues: [] };
+    text = r.text;
+  }
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch (e) {
+    return { jsonUrl, found: true, status, entities: 0, chunks: 0, relations: 0, issues: [{ level: "error", path: "root", msg: `Not valid JSON (${e.message}).` }] };
+  }
+  const v = validateEntityMap(doc);
+  const res = { jsonUrl, found: true, status, ...v, generated: doc.generated, verificationStatus: doc.verificationStatus };
+  if (origin) {
+    const h = await get3(f, `${origin}/entitymap.html`);
+    res.html = { url: `${origin}/entitymap.html`, status: h.status, checks: h.status === 200 ? checkHtml(h.text, String(doc?.publisher?.name ?? "")) : [] };
+  }
+  return res;
+}
+function entitymapMarkdown(r, max = 25) {
+  const L = [`# EntityMap check: ${r.jsonUrl}`, ""];
+  if (!r.found) {
+    L.push(`No EntityMap found (HTTP ${r.status || "no response"}).`, "", "EntityMap is an open standard for publishing a site's entities, their relationships and source passages for AI systems: entitymap.json at the domain root, plus a generated entitymap.html. Spec: https://entitymap.org/spec/v1.0");
+    return L.join("\n");
+  }
+  const errs = r.issues.filter((i) => i.level === "error"), warns = r.issues.filter((i) => i.level === "warning");
+  L.push(`**${errs.length ? `Not valid: ${errs.length} error${errs.length === 1 ? "" : "s"}` : "Valid against the v1.0 rules checked"}**, ${warns.length} warning${warns.length === 1 ? "" : "s"}.`, "");
+  L.push(`- ${r.entities} entities, ${r.chunks} chunks, ${r.relations} relations`);
+  if (r.generated) L.push(`- Generated ${r.generated}`);
+  if (r.verificationStatus) L.push(`- verificationStatus: ${r.verificationStatus}`);
+  L.push("");
+  const list = (title, xs) => {
+    if (!xs.length) return;
+    L.push(`## ${title}`, "");
+    for (const i of xs.slice(0, max)) L.push(`- \`${i.path}\`: ${i.msg}`);
+    if (xs.length > max) L.push(`- \u2026and ${xs.length - max} more`);
+    L.push("");
+  };
+  list("Errors", errs);
+  list("Warnings", warns);
+  if (r.html) {
+    L.push("## HTML companion", "");
+    if (r.html.status !== 200) L.push(`- ${r.html.url}: HTTP ${r.html.status || "no response"}. The spec expects an entitymap.html generated from the JSON.`);
+    else for (const c of r.html.checks) L.push(`- ${c.ok ? "\u2713" : "\u2717"} ${c.label}`);
+    L.push("");
+  }
+  L.push("Checked against EntityMap v1.0 (https://entitymap.org/spec/v1.0). The official validator is https://entitymap.org/validate.");
+  return L.join("\n");
+}
+
+// src/images.ts
+var UA10 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 AlchemyAgent/0.3";
+var KB = 1024;
+var attr = (tag2, name) => {
+  const m = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag2);
+  return m ? m[2] ?? m[3] ?? m[4] ?? "" : null;
+};
+function extractImages(html, base) {
+  const abs = (u) => {
+    try {
+      return new URL(u.trim(), base).href;
+    } catch {
+      return "";
+    }
+  };
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const page = (() => {
+    try {
+      const u = new URL(base);
+      return u.origin + u.pathname;
+    } catch {
+      return base;
+    }
+  })();
+  const add = (i) => {
+    if (!i.url || i.url.startsWith("data:") || seen.has(i.url) || i.url.split(/[?#]/)[0] === page) return;
+    seen.add(i.url);
+    out.push(i);
+  };
+  const body = html.replace(/<!--[\s\S]*?-->/g, "").replace(/<noscript[\s\S]*?<\/noscript>/gi, "");
+  let n4 = 0;
+  for (const m of body.matchAll(/<(img|source|video)\b[^>]*>/gi)) {
+    const tag2 = m[0], name = m[1].toLowerCase();
+    if (name === "img") {
+      const src = attr(tag2, "data-lazy-src") || attr(tag2, "data-src") || attr(tag2, "src") || "";
+      add({ url: abs(src), kind: "img", index: n4++, alt: attr(tag2, "alt"), width: attr(tag2, "width"), height: attr(tag2, "height"), loading: attr(tag2, "loading") ?? (attr(tag2, "data-src") || attr(tag2, "data-lazy-src") ? "lazy" : null), fetchpriority: attr(tag2, "fetchpriority"), srcset: !!(attr(tag2, "srcset") || attr(tag2, "data-srcset")) });
+    } else if (name === "source") {
+      const ss = attr(tag2, "srcset") || attr(tag2, "data-srcset");
+      const src = attr(tag2, "src");
+      if (src && /video|mp4|webm/i.test(attr(tag2, "type") ?? src)) add({ url: abs(src), kind: "video", index: n4++, srcset: false });
+      else if (ss) add({ url: abs(ss.split(",")[0].trim().split(/\s+/)[0]), kind: "source", index: n4++, srcset: true });
+    } else {
+      const poster = attr(tag2, "poster");
+      const autoplay = /\sautoplay\b/i.test(tag2);
+      const src = attr(tag2, "src");
+      if (poster) add({ url: abs(poster), kind: "poster", index: n4++, srcset: false });
+      if (src) add({ url: abs(src), kind: "video", index: n4++, srcset: false, autoplay, hasPoster: !!poster });
+    }
+  }
+  for (const m of body.matchAll(/<video\b([^>]*)>([\s\S]*?)<\/video>/gi)) {
+    const autoplay = /\sautoplay\b/i.test(m[1]), hasPoster = !!attr(`<v ${m[1]}>`, "poster");
+    for (const s of m[2].matchAll(/<source\b[^>]*>/gi)) {
+      const u = abs(attr(s[0], "src") ?? "");
+      const v = out.find((x) => x.url === u && x.kind === "video");
+      if (v) {
+        v.autoplay = autoplay;
+        v.hasPoster = hasPoster;
+      }
+    }
+  }
+  const og = /<meta\b[^>]*property=["']og:image["'][^>]*>/i.exec(body);
+  const ogUrl = og ? abs(attr(og[0], "content") ?? "") : "";
+  if (ogUrl) out.push({ url: ogUrl, kind: "og", index: -1, srcset: false });
+  return out.filter((i) => i.url || i.kind === "video");
+}
+async function measure(f, img) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 2e4);
+  try {
+    const isSvg = /\.svg(\?|#|$)/i.test(img.url);
+    const res = await f(img.url, { method: img.kind === "video" ? "HEAD" : "GET", headers: { "user-agent": UA10, accept: "image/avif,image/webp,image/*,*/*;q=0.8" }, redirect: "follow", signal: ctl.signal });
+    img.status = res.status;
+    img.type = (res.headers.get("content-type") ?? "").split(";")[0].trim();
+    if (img.kind === "video") {
+      img.bytes = Number(res.headers.get("content-length")) || void 0;
+      return;
+    }
+    if (/^text\/html/.test(img.type)) {
+      img.status = -1;
+      return;
+    }
+    if (isSvg || img.type === "image/svg+xml") {
+      const text = await res.text();
+      img.bytes = new TextEncoder().encode(text).length;
+      let emb = 0;
+      for (const m of text.matchAll(/data:image\/(?:png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)/g)) emb += Math.floor(m[1].replace(/\s/g, "").length * 3 / 4);
+      if (emb) img.embeddedRasterBytes = emb;
+    } else {
+      img.bytes = (await res.arrayBuffer()).byteLength;
+    }
+  } catch {
+    img.status = 0;
+  } finally {
+    clearTimeout(t);
+  }
+}
+var fmt2 = (b) => b == null ? "?" : b >= KB * KB ? `${(b / KB / KB).toFixed(1)} MB` : `${Math.round(b / KB)} KB`;
+var short = (u) => {
+  try {
+    const x = new URL(u);
+    return x.pathname.split("/").filter(Boolean).slice(-2).join("/") || x.hostname;
+  } catch {
+    return u;
+  }
+};
+async function imageAudit(input, f = fetch, maxImages = 40) {
+  const url = /^https?:\/\//i.test(input) ? input : `https://${input}`;
+  let res;
+  try {
+    res = await f(url, { headers: { "user-agent": UA10, accept: "text/html" }, redirect: "follow" });
+  } catch {
+    throw new Error(`Couldn't load ${url}.`);
+  }
+  const html = await res.text();
+  if (res.status !== 200) throw new Error(`${url} returned HTTP ${res.status}${/cf-mitigated|challenge/i.test(html) ? " (a bot challenge)" : ""}.`);
+  const images = extractImages(html, res.url || url).slice(0, maxImages);
+  const queue = images.filter((i) => i.url);
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    for (let i = queue.shift(); i; i = queue.shift()) await measure(f, i);
+  }));
+  const page = images.filter((i) => i.kind !== "og" && i.kind !== "video" && i.status !== -1);
+  const totalBytes = page.reduce((a, i) => a + (i.bytes ?? 0), 0);
+  const findings = [];
+  const push = (severity, title, detail, xs, label) => {
+    if (xs.length) findings.push({ severity, title, detail, items: xs.map(label) });
+  };
+  push(
+    1,
+    "Photos hidden inside SVG files",
+    "These .svg files wrap a base64 PNG or JPEG. They can't be compressed, cached or resized like real images, and they're often several MB. Export each as WebP (or AVIF) and point the page at that file.",
+    page.filter((i) => (i.embeddedRasterBytes ?? 0) > 20 * KB),
+    (i) => `${short(i.url)}: ${fmt2(i.bytes)} (${fmt2(i.embeddedRasterBytes)} of embedded raster)`
+  );
+  const first = page.find((i) => i.kind === "img");
+  if (first && first.loading === "lazy") findings.push({ severity: 1, title: "The first image is lazy-loaded", detail: 'The first image is usually the hero and the Largest Contentful Paint element. Lazy-loading it delays LCP. Use loading="eager" and fetchpriority="high" on it.', items: [short(first.url)] });
+  push(1, "Autoplay videos without a poster image", "Without a poster, the browser shows nothing until the video downloads, and the video itself becomes the LCP element. Add a lightweight WebP poster.", images.filter((i) => i.kind === "video" && i.autoplay && !i.hasPoster), (i) => i.url ? `${short(i.url)}${i.bytes ? ` (${fmt2(i.bytes)})` : ""}` : "inline <video> with no src");
+  push(2, "Heavy images (over 200 KB)", "Resize to the largest size the layout actually shows (usually under 2000 px wide) and compress. Most photos land under 150 KB as WebP.", page.filter((i) => (i.bytes ?? 0) > 200 * KB && !i.embeddedRasterBytes).sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0)), (i) => `${short(i.url)}: ${fmt2(i.bytes)}`);
+  push(2, "JPG, PNG or GIF that should be WebP or AVIF", "WebP is typically 25\u201335% smaller than JPEG at the same quality, and every current browser supports it.", page.filter((i) => /image\/(jpeg|png|gif)/.test(i.type ?? "") && (i.bytes ?? 0) > 50 * KB), (i) => `${short(i.url)} (${i.type?.replace("image/", "")}, ${fmt2(i.bytes)})`);
+  push(2, "Large images without srcset", "Phones download the full desktop file. Add srcset and sizes so each device gets a right-sized version (WordPress does this automatically for images inserted from the media library).", page.filter((i) => i.kind === "img" && !i.srcset && (i.bytes ?? 0) > 100 * KB && !/svg/.test(i.type ?? "")), (i) => `${short(i.url)}: ${fmt2(i.bytes)}`);
+  push(3, "Missing width and height", "Without dimensions the layout jumps as images load (Cumulative Layout Shift).", page.filter((i) => i.kind === "img" && (!i.width || !i.height)), (i) => short(i.url));
+  push(3, "Below-the-fold images not lazy-loaded", `Images after the first few should use loading="lazy" so they don't compete with the hero.`, page.filter((i) => i.kind === "img" && i.index > 3 && i.loading !== "lazy"), (i) => short(i.url));
+  push(3, "Missing alt text", 'Alt text is how screen readers and AI systems understand an image. Describe what it shows; use alt="" only for decoration.', page.filter((i) => i.kind === "img" && i.alt == null), (i) => short(i.url));
+  push(3, "Broken images", "These image URLs didn't load.", images.filter((i) => i.url && i.status != null && i.status !== 0 && i.status >= 400), (i) => `${short(i.url)} (HTTP ${i.status})`);
+  const og = images.find((i) => i.kind === "og");
+  if (!og) findings.push({ severity: 3, title: "No og:image", detail: "Links shared in Slack, LinkedIn and chat apps show no preview image. Add a 1200x630 og:image.", items: [] });
+  else if ((og.bytes ?? 0) > 600 * KB) findings.push({ severity: 3, title: "Heavy share image", detail: "Some platforms skip og:images over a few hundred KB or time out fetching them.", items: [`${short(og.url)}: ${fmt2(og.bytes)}`] });
+  findings.sort((a, b) => a.severity - b.severity);
+  return { url: res.url || url, status: res.status, images, totalBytes, findings };
+}
+function imageMarkdown(a, maxItems = 8) {
+  const L = [`# Image audit: ${a.url}`, ""];
+  const imgs = a.images.filter((i) => i.kind !== "og" && i.kind !== "video" && i.status !== -1);
+  const biggest = [...imgs].sort((x, y) => (y.bytes ?? 0) - (x.bytes ?? 0))[0];
+  L.push(`- ${imgs.length} images found in the HTML, ${fmt2(a.totalBytes)} in total${biggest?.bytes ? `; the largest is ${short(biggest.url)} at ${fmt2(biggest.bytes)}` : ""}`);
+  const vids = a.images.filter((i) => i.kind === "video");
+  if (vids.length) L.push(`- ${vids.length} video${vids.length === 1 ? "" : "s"}${vids.some((v) => v.autoplay) ? " (autoplay)" : ""}`);
+  L.push("- Counts only what's in the page HTML. Images added later by JavaScript or CSS backgrounds aren't included; use pagespeed_check for the full picture.", "");
+  if (!a.findings.length) {
+    L.push("No image problems found.");
+    return L.join("\n");
+  }
+  const label = ["", "Fix first", "Fix next", "Worth doing"];
+  for (const s of [1, 2, 3]) {
+    const fs = a.findings.filter((x) => x.severity === s);
+    if (!fs.length) continue;
+    L.push(`## ${label[s]}`, "");
+    for (const x of fs) {
+      L.push(`**${x.title}**${x.items.length ? ` (${x.items.length})` : ""}. ${x.detail}`);
+      for (const it of x.items.slice(0, maxItems)) L.push(`- ${it}`);
+      if (x.items.length > maxItems) L.push(`- \u2026and ${x.items.length - maxItems} more`);
+      L.push("");
+    }
+  }
+  return L.join("\n").trimEnd();
+}
+
+// src/featured.ts
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir as mkdir3, readFile as readFile3, writeFile as writeFile3 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { join as join3, resolve } from "node:path";
+var esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+var fmt3 = (v) => Number.isInteger(v) ? v.toLocaleString("en-US") : v.toLocaleString("en-US", { maximumFractionDigits: 1 });
+var font = (f) => f.trim().replace(/ /g, "+");
+function cardHtml(c, accent) {
+  const title = c.title ? `<h3>${esc(c.title)}</h3>` : "";
+  const foot = (f) => f ? `<div class="foot"><span class="big" style="color:${accent}">${esc(f.value)}</span><span>${esc(f.text)}</span></div>` : "";
+  if (c.type === "bars") {
+    const max = Math.max(...c.rows.map((r) => r.value), 1);
+    const colors = [accent, "#f98600", "#e8e8e8", "#9ad1ff", "#b9f6ca"];
+    return title + c.rows.slice(0, 5).map((r, i) => `<div class="bar"><div class="bl"><span><b>${esc(r.label)}</b>${r.note ? ` <i>\xB7 ${esc(r.note)}</i>` : ""}</span><b class="num">${fmt3(r.value)}</b></div><div class="track"><div style="width:${Math.max(r.value / max * 100, 1.6).toFixed(1)}%;background:${colors[i % colors.length]}"></div></div></div>`).join("") + foot(c.footer);
+  }
+  if (c.type === "stats") {
+    return title + `<div class="stats">${c.rows.slice(0, 4).map((r) => `<div><span class="big" style="color:${accent}${r.value.length > 9 ? ";font-size:28px" : ""}">${esc(r.value)}</span><span>${esc(r.label)}</span></div>`).join("")}</div>`;
+  }
+  if (c.type === "before_after") {
+    const W = 492, x0 = 150, x1 = 480, rows = c.rows.slice(0, 7);
+    const X = (v) => x0 + (v - c.min) / Math.max(c.max - c.min, 1) * (x1 - x0);
+    const H = 20 + rows.length * 42 + 20;
+    let svg = `<svg width="${W}" height="${Math.min(H + 24, 290)}" viewBox="0 0 ${W} ${H + 24}" font-family="inherit">`;
+    const step = c.max - c.min <= 10 ? 1 : Math.ceil((c.max - c.min) / 8);
+    for (let v = c.min; v <= c.max; v += step) svg += `<line x1="${X(v)}" y1="0" x2="${X(v)}" y2="${H}" stroke="#262626"/><text x="${X(v)}" y="${H + 20}" fill="#8a8a8a" font-size="13" text-anchor="middle">${v}</text>`;
+    rows.forEach((r, i) => {
+      const y = 20 + i * 42;
+      svg += `<text x="0" y="${y + 5}" fill="#e6e6e6" font-size="15">${esc(r.label)}</text><line x1="${X(r.before)}" y1="${y}" x2="${X(r.after)}" y2="${y}" stroke="${accent}" stroke-width="4"/><circle cx="${X(r.before)}" cy="${y}" r="8" fill="#6b6b6b"/><circle cx="${X(r.after)}" cy="${y}" r="9" fill="${accent}"/>`;
+    });
+    return title + svg + "</svg>" + foot(c.footer);
+  }
+  return title + `<ul class="list">${c.rows.slice(0, 6).map((r) => `<li><span style="background:${accent}"></span>${esc(r)}</li>`).join("")}</ul>`;
+}
+async function featuredHtml(s) {
+  const bg = s.background ?? "#ffc61a", ink = s.ink ?? "#111111", accent = s.accent ?? bg;
+  const hf = s.headingFont ?? "Days One", bf = s.bodyFont ?? "DM Sans";
+  let logo = s.brand ? `<div class="brand">${esc(s.brand)}</div>` : "";
+  if (s.logoSvg) {
+    const svg = await readFile3(resolve(s.logoSvg.replace(/^~(?=\/)/, homedir3())), "utf8");
+    logo = `<div class="logo">${svg.replace(/<\?xml[^>]*>/, "")}</div>`;
+  }
+  const long = s.headline.length > 42;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+@import url('https://fonts.googleapis.com/css2?family=${font(hf)}&family=${font(bf)}:wght@400;500;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1200px;height:630px;overflow:hidden}
+body{font-family:'${bf}',sans-serif;color:${ink};position:relative;background:radial-gradient(circle at 18% 105%,rgba(255,255,255,.28) 0,transparent 55%),radial-gradient(circle at 95% 0%,rgba(0,0,0,.08) 0,transparent 50%),${bg}}
+.rings{position:absolute;left:-240px;bottom:-330px;width:760px;height:760px;border-radius:50%;box-shadow:0 0 0 38px rgba(255,255,255,.10),0 0 0 76px rgba(0,0,0,.035),0 0 0 114px rgba(255,255,255,.08),0 0 0 152px rgba(0,0,0,.03)}
+.pix{position:absolute;right:0;top:0;width:520px;height:630px;opacity:.55;background-image:linear-gradient(90deg,rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px);background-size:44px 44px}
+.logo{position:absolute;left:64px;top:48px;height:52px;display:flex;align-items:center}.logo svg{height:44px;width:auto;max-width:420px}
+.brand{position:absolute;left:64px;top:58px;font:700 22px '${bf}';letter-spacing:.12em;text-transform:uppercase}
+.eyebrow{position:absolute;right:64px;top:60px;font:700 13px '${bf}';letter-spacing:.14em;background:${ink};color:${bg};padding:8px 14px;border-radius:999px;text-transform:uppercase}
+.left{position:absolute;left:64px;top:150px;width:470px}
+h1{font-family:'${hf}',sans-serif;font-weight:400;font-size:${long ? 40 : 46}px;line-height:1.08}
+.sub{margin-top:18px;font-size:20px;line-height:1.4;font-weight:500;opacity:.88}
+.card{position:absolute;right:56px;top:128px;width:560px;height:410px;background:#111;border-radius:22px;padding:30px 34px;color:#f2f2f2;box-shadow:0 30px 60px rgba(0,0,0,.22);overflow:hidden}
+.card h3{font:700 13px '${bf}';letter-spacing:.14em;color:${accent === "#111111" ? "#fff" : accent};margin-bottom:18px;text-transform:uppercase}
+.bar{margin:0 0 22px}.bl{display:flex;justify-content:space-between;font-size:15px;margin-bottom:8px}.bl i{color:#9a9a9a;font-style:normal}.num{font-family:'${hf}'}
+.track{height:26px;background:#222;border-radius:6px}.track div{height:26px;border-radius:6px}
+.foot{border-top:1px solid #2c2c2c;padding-top:18px;display:flex;align-items:baseline;gap:14px}.foot span:last-child{font-size:15px;line-height:1.35;color:#d8d8d8}
+.big{font:400 40px '${hf}'}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:26px 22px;margin-top:8px}.stats div{display:flex;flex-direction:column;gap:6px}.stats span:last-child{font-size:15px;color:#d8d8d8;line-height:1.35}
+.list{list-style:none;margin-top:6px}.list li{display:flex;gap:12px;align-items:center;font-size:18px;margin:0 0 18px}.list li span{width:10px;height:10px;border-radius:50%;flex:none}
+.src{position:absolute;left:64px;bottom:40px;font-size:14px;font-weight:500;opacity:.8}
+.url{position:absolute;right:64px;bottom:40px;font:700 14px '${bf}'}
+</style></head><body><div class="rings"></div><div class="pix"></div>${logo}${s.eyebrow ? `<div class="eyebrow">${esc(s.eyebrow)}</div>` : ""}
+<div class="left"><h1>${esc(s.headline)}</h1>${s.subhead ? `<p class="sub">${esc(s.subhead)}</p>` : ""}</div>
+<div class="card">${cardHtml(s.card, accent === bg && /^#?f/i.test(bg) ? bg : accent)}</div>
+${s.source ? `<div class="src">${esc(s.source)}</div>` : ""}${s.site ? `<div class="url">${esc(s.site)}</div>` : ""}</body></html>`;
+}
+function findChrome() {
+  const c = process.platform === "darwin" ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"] : process.platform === "win32" ? [`${process.env["PROGRAMFILES"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["PROGRAMFILES(X86)"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["LOCALAPPDATA"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["PROGRAMFILES(X86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`] : ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/microsoft-edge"];
+  return c.find((p) => p && existsSync(p)) ?? null;
+}
+async function renderFeatured(spec, outDir, name = "featured") {
+  const dir = resolve((outDir ?? join3(homedir3(), "Downloads", "alchemyagent-images")).replace(/^~(?=\/)/, homedir3()));
+  await mkdir3(dir, { recursive: true });
+  const slug2 = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "featured";
+  const html = join3(dir, `${slug2}.html`), png = join3(dir, `${slug2}.png`);
+  await writeFile3(html, await featuredHtml(spec), "utf8");
+  const chrome = findChrome();
+  if (!chrome) return { html, note: "No Chrome, Edge, Chromium or Brave found, so only the HTML was written. Open it in a browser at 1200x630 and screenshot it, or install Chrome and run again." };
+  await new Promise((ok) => execFile(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2", "--window-size=1200,630", "--virtual-time-budget=5000", `--screenshot=${png}`, `file://${html}`], { timeout: 6e4 }, () => ok()));
+  return existsSync(png) ? { html, png } : { html, note: `Chrome didn't produce a screenshot. The HTML is at ${html}.` };
+}
+
 // src/bing.ts
 var BASE2 = "https://ssl.bing.com/webmaster/api.svc/json/";
 var BING_KEY_HELP = "Bing Webmaster Tools needs your own API key. In Bing Webmaster Tools (https://www.bing.com/webmasters), open Settings (the gear) > API access > API key, generate a key, then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The key stays on your computer and is only sent to Bing.";
@@ -2442,15 +2914,15 @@ async function listSites2(f, key) {
   return d.map((s) => ({ url: String(s.Url), verified: !!s.IsVerified }));
 }
 function matchSite(sites, input) {
-  const host3 = (u) => {
+  const host4 = (u) => {
     try {
       return new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, "").toLowerCase();
     } catch {
       return "";
     }
   };
-  const want = host3(input);
-  return sites.find((s) => s.url.replace(/\/$/, "") === input.replace(/\/$/, "")) ?? sites.find((s) => host3(s.url) === want) ?? null;
+  const want = host4(input);
+  return sites.find((s) => s.url.replace(/\/$/, "") === input.replace(/\/$/, "")) ?? sites.find((s) => host4(s.url) === want) ?? null;
 }
 function aggregate(rows) {
   const by = /* @__PURE__ */ new Map();
@@ -2595,7 +3067,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.5";
+var VERSION = "0.3.6";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer2(opts = {}) {
@@ -2723,8 +3195,8 @@ function createServer2(opts = {}) {
         let text = csv_text;
         if (!text && csv_path && opts.remote) throw new Error("This hosted version can't read files. Paste the contents of Queries.csv as csv_text.");
         if (!text && csv_path) {
-          const { readFile: readFile3 } = await import("node:fs/promises");
-          text = await readFile3(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
+          const { readFile: readFile4 } = await import("node:fs/promises");
+          text = await readFile4(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
         }
         if (!text) throw new Error("Pass csv_path (the Queries.csv from a Search Console export) or csv_text.");
         const rows = rowsFromCsv(text);
@@ -2789,10 +3261,10 @@ function createServer2(opts = {}) {
       annotations: ro
     },
     async ({ url }) => run(async () => {
-      const host3 = new URL(normalizeUrl(url)).hostname;
-      const wd = await api(`/api/wikidata?${new URLSearchParams({ domain: host3 })}`).catch(() => null);
+      const host4 = new URL(normalizeUrl(url)).hostname;
+      const wd = await api(`/api/wikidata?${new URLSearchParams({ domain: host4 })}`).catch(() => null);
       const article = wd?.matchedBy === "official website" ? wd.entities?.[0]?.wikipedia : void 0;
-      return wikipediaMarkdown(await wikipediaCheck(host3, article, f));
+      return wikipediaMarkdown(await wikipediaCheck(host4, article, f));
     })
   );
   register(
@@ -2820,9 +3292,9 @@ function createServer2(opts = {}) {
       async ({ url, include }) => {
         try {
           const target = normalizeUrl(url);
-          const host3 = new URL(target).hostname.replace(/^www\./, "");
+          const host4 = new URL(target).hostname.replace(/^www\./, "");
           const [robots, page] = await Promise.all([
-            include === "page" ? Promise.resolve(null) : robotsHistory(host3, f),
+            include === "page" ? Promise.resolve(null) : robotsHistory(host4, f),
             include === "robots" ? Promise.resolve(null) : pageHistory(target, f)
           ]);
           return { content: [{ type: "text", text: waybackMarkdown(robots, page) }] };
@@ -2898,8 +3370,8 @@ function createServer2(opts = {}) {
       },
       async ({ url, queries, country }) => run(async () => {
         if (!opts.braveKey) throw new Error(BRAVE_KEY_HELP);
-        const host3 = new URL(normalizeUrl(url)).hostname;
-        return braveMarkdown(host3, await braveRank(f, opts.braveKey, host3, queries, country.toUpperCase()), country.toUpperCase());
+        const host4 = new URL(normalizeUrl(url)).hostname;
+        return braveMarkdown(host4, await braveRank(f, opts.braveKey, host4, queries, country.toUpperCase()), country.toUpperCase());
       })
     );
     register(
@@ -3039,6 +3511,90 @@ ${md}`;
         }
         return alertsMarkdown(res);
       })
+    );
+    register(
+      "featured_image",
+      {
+        title: "Featured image generator (data card)",
+        description: "Make a blog featured image or social share image (1200x630, rendered at 2400x1260 PNG) from a post's own data: a headline and subhead on the left and a data card on the right (bar chart, big stats, before/after ratings, or a key-points list), in the user's brand colors with their SVG logo. Use real numbers from the post; never invent data. Renders locally with the user's Chrome or Edge and saves the PNG and its HTML source (default folder ~/Downloads/alchemyagent-images). Original data visuals help image search and give AI systems something concrete to describe; write descriptive alt text from the same numbers.",
+        inputSchema: {
+          headline: external_exports.string().max(80).describe("Short headline, ideally under 40 characters"),
+          subhead: external_exports.string().max(140).optional(),
+          eyebrow: external_exports.string().max(32).optional().describe("Small label top right, e.g. CASE STUDY"),
+          source: external_exports.string().max(90).optional().describe("Source line bottom left, e.g. 'Source: GA4 and Cloudflare, Oct 2026'"),
+          site: external_exports.string().max(40).optional().describe("Domain shown bottom right"),
+          brand: external_exports.string().max(30).optional().describe("Brand name text, used when no logo_svg is given"),
+          logo_svg: external_exports.string().optional().describe("Path to an SVG logo file (a dark logo reads best on light backgrounds)"),
+          background: external_exports.string().optional().describe("Background color (hex). Default #ffc61a"),
+          ink: external_exports.string().optional().describe("Text color (hex). Default #111111"),
+          accent: external_exports.string().optional().describe("Accent color for the data card (hex). Defaults to the background color"),
+          heading_font: external_exports.string().optional().describe("Google Font for the headline. Default Days One"),
+          body_font: external_exports.string().optional().describe("Google Font for body text. Default DM Sans"),
+          card: external_exports.discriminatedUnion("type", [
+            external_exports.object({ type: external_exports.literal("bars"), title: external_exports.string().optional(), rows: external_exports.array(external_exports.object({ label: external_exports.string(), note: external_exports.string().optional(), value: external_exports.number() })).min(1).max(5), footer: external_exports.object({ value: external_exports.string(), text: external_exports.string() }).optional() }),
+            external_exports.object({ type: external_exports.literal("stats"), title: external_exports.string().optional(), rows: external_exports.array(external_exports.object({ value: external_exports.string(), label: external_exports.string() })).min(1).max(4) }),
+            external_exports.object({ type: external_exports.literal("before_after"), title: external_exports.string().optional(), min: external_exports.number(), max: external_exports.number(), rows: external_exports.array(external_exports.object({ label: external_exports.string(), before: external_exports.number(), after: external_exports.number() })).min(1).max(7), footer: external_exports.object({ value: external_exports.string(), text: external_exports.string() }).optional() }),
+            external_exports.object({ type: external_exports.literal("list"), title: external_exports.string().optional(), rows: external_exports.array(external_exports.string()).min(1).max(6) })
+          ]).describe("The data card. bars: up to 5 values; stats: up to 4 big numbers; before_after: ratings on a scale; list: up to 6 short points"),
+          out_dir: external_exports.string().optional().describe("Folder to save into. Default ~/Downloads/alchemyagent-images"),
+          file_name: external_exports.string().optional().describe("File name without extension, e.g. the post slug")
+        },
+        annotations: { readOnlyHint: false, openWorldHint: false }
+      },
+      async (a) => {
+        try {
+          const r = await renderFeatured({ headline: a.headline, subhead: a.subhead, eyebrow: a.eyebrow, source: a.source, site: a.site, brand: a.brand, logoSvg: a.logo_svg, background: a.background, ink: a.ink, accent: a.accent, headingFont: a.heading_font, bodyFont: a.body_font, card: a.card }, a.out_dir, a.file_name ?? a.headline);
+          const text = [r.png ? `Saved ${r.png} (2400x1260) and its source ${r.html}.` : `Wrote ${r.html}.`, r.note ?? "", "Upload it as the post's featured image (most SEO plugins also use it as og:image) and write alt text that states what the chart shows, with the numbers."].filter(Boolean).join("\n");
+          const content = [{ type: "text", text }];
+          if (r.png) content.push({ type: "image", data: (await (await import("node:fs/promises")).readFile(r.png)).toString("base64"), mimeType: "image/png" });
+          return { content };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
+    );
+    register(
+      "image_audit",
+      {
+        title: "Image optimization audit",
+        description: "Audit the images on one page and rank what to fix: photos hidden inside SVG files (base64 rasters), a lazy-loaded hero image, autoplay videos without posters, heavy files, JPG/PNG that should be WebP or AVIF, large images without srcset, missing width/height (layout shift), below-the-fold images not lazy-loaded, missing alt text, broken images and the og:image. Downloads each image once from the user's machine to measure its real size.",
+        inputSchema: {
+          url: external_exports.string().describe("Page URL, e.g. https://example.com/ or example.com"),
+          max_images: external_exports.number().int().min(5).max(80).default(40).describe("Max images to measure")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async ({ url, max_images }) => {
+        try {
+          return { content: [{ type: "text", text: imageMarkdown(await imageAudit(url, f, max_images)) }] };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
+    );
+    register(
+      "entitymap_check",
+      {
+        title: "EntityMap validator",
+        description: "Validate a site's EntityMap (the open standard for publishing a site's entities, relationships and source passages for AI systems): fetches /entitymap.json and /entitymap.html from the domain, or checks a local draft file, against the EntityMap v1.0 spec. Reports errors (required fields, types, predicates, chunk limits, publisher attribution, confidence on interpretive predicates, conflicting relations) and warnings (staleness, missing sameAs, overuse of RELATES_TO, dangling targets), plus the HTML companion's required attribution. Spec: https://entitymap.org/spec/v1.0.",
+        inputSchema: {
+          url: external_exports.string().optional().describe("Site or domain, e.g. example.com. Fetches /entitymap.json and /entitymap.html from its root."),
+          json_path: external_exports.string().optional().describe("Or: path to a local entitymap.json draft to check before publishing"),
+          max_issues: external_exports.number().int().min(5).max(200).default(25).describe("Max errors and warnings to list per section")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async ({ url, json_path, max_issues }) => {
+        try {
+          if (!url && !json_path) throw new Error("Give a url (e.g. example.com) or a json_path to a local entitymap.json.");
+          const text = json_path ? await (await import("node:fs/promises")).readFile(json_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8") : void 0;
+          const r = await entitymapCheck(url ?? "", f, text);
+          if (json_path && !url) r.jsonUrl = json_path;
+          return { content: [{ type: "text", text: entitymapMarkdown(r, max_issues) }] };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
     );
     register(
       "log_file_analysis",
