@@ -1,5 +1,39 @@
 // AlchemyAgent for Claude. (c) AlchemyLeads. https://alchemyagent.ai
 import {
+  BING_KEY_HELP,
+  BOTS,
+  CF_TOKEN_HELP,
+  GA4_SCOPE,
+  TOKEN_FILE,
+  bingMarkdown,
+  bingReport,
+  connState,
+  connectionStatus,
+  connectionsMarkdown,
+  dateRange,
+  entitymapCheck,
+  entitymapMarkdown,
+  ga4Markdown,
+  ga4Report,
+  hasScope,
+  imageAudit,
+  imageMarkdown,
+  listProperties,
+  listSites,
+  listSites2,
+  logMarkdown,
+  logReport,
+  matchGa4,
+  matchProperty,
+  matchSite,
+  propertiesMarkdown,
+  renderFeatured,
+  rowsMarkdown,
+  searchAnalytics,
+  sitesMarkdown,
+  startConnect
+} from "./chunks/chunk-OFQYJPIG.mjs";
+import {
   JSONRPCMessageSchema,
   McpServer
 } from "./chunks/chunk-OVF2AMSK.mjs";
@@ -112,12 +146,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve) => {
       const json4 = serializeMessage(message);
       if (this._stdout.write(json4)) {
-        resolve2();
+        resolve();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve);
       }
     });
   }
@@ -172,7 +206,7 @@ function summarize(raw, strategy) {
   const hasMetrics = (x) => x?.metrics && Object.keys(x.metrics).length > 0 && x.origin_fallback !== true;
   const src = hasMetrics(page) ? page : origin?.metrics ? origin : null;
   const scope = src === page && src ? "page" : src ? "origin" : "none";
-  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt4]]) => ({ name, value: fmt4(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
+  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt2]]) => ({ name, value: fmt2(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
   const audits = lh.audits ?? {};
   const lab = LAB_METRICS.filter((k) => audits[k]?.displayValue).map((k) => ({ name: audits[k].title, value: audits[k].displayValue }));
   const opportunities = Object.values(audits).filter((a) => a?.details?.type === "opportunity" && (a.details.overallSavingsMs ?? 0) >= 100 && (a.score ?? 1) < 0.9).sort((a, b) => b.details.overallSavingsMs - a.details.overallSavingsMs).slice(0, 5).map((a) => ({ title: a.title, savings: `~${(a.details.overallSavingsMs / 1e3).toFixed(1)}s` }));
@@ -258,29 +292,6 @@ function trendMarkdown(data) {
   ];
   return out.join("\n");
 }
-
-// src/bots.ts
-var BOTS = [
-  { token: "GPTBot", owner: "OpenAI", purpose: "Model training", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.1; +https://openai.com/gptbot", ipList: "https://openai.com/gptbot.json" },
-  { token: "OAI-SearchBot", owner: "OpenAI", purpose: "ChatGPT search index", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot", ipList: "https://openai.com/searchbot.json" },
-  { token: "ChatGPT-User", owner: "OpenAI", purpose: "Live fetch when a ChatGPT user asks", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot", ipList: "https://openai.com/chatgpt-user.json" },
-  { token: "ClaudeBot", owner: "Anthropic", purpose: "Model training", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)" },
-  { token: "Claude-SearchBot", owner: "Anthropic", purpose: "Claude search index" },
-  { token: "Claude-User", owner: "Anthropic", purpose: "Live fetch when a Claude user asks" },
-  { token: "PerplexityBot", owner: "Perplexity", purpose: "Perplexity search index", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)", ipList: "https://www.perplexity.com/perplexitybot.json" },
-  { token: "Perplexity-User", owner: "Perplexity", purpose: "Live fetch when a Perplexity user asks", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)", ipList: "https://www.perplexity.com/perplexity-user.json" },
-  { token: "Googlebot", owner: "Google", purpose: "Google Search, AI Overviews and AI Mode", ua: "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", ipList: "https://developers.google.com/static/search/apis/ipranges/googlebot.json" },
-  { token: "Google-Extended", owner: "Google", purpose: "robots.txt opt-out for Gemini training and grounding (no separate crawler)" },
-  { token: "Bingbot", owner: "Microsoft", purpose: "Bing Search and Copilot", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/116.0.1938.76 Safari/537.36", ipList: "https://www.bing.com/toolbox/bingbot.json" },
-  { token: "Applebot", owner: "Apple", purpose: "Siri and Spotlight search" },
-  { token: "Applebot-Extended", owner: "Apple", purpose: "robots.txt opt-out for Apple Intelligence training (no separate crawler)" },
-  { token: "CCBot", owner: "Common Crawl", purpose: "Open web dataset widely used for training" },
-  { token: "Meta-ExternalAgent", owner: "Meta", purpose: "Model training" },
-  { token: "Amazonbot", owner: "Amazon", purpose: "Alexa and Amazon AI" },
-  { token: "Bytespider", owner: "ByteDance", purpose: "Model training" },
-  { token: "DuckAssistBot", owner: "DuckDuckGo", purpose: "DuckAssist AI answers" },
-  { token: "MistralAI-User", owner: "Mistral", purpose: "Live fetch when a Le Chat user asks" }
-];
 
 // src/robots.ts
 function parseRobots(txt) {
@@ -546,7 +557,7 @@ var LOCAL_SUBTYPES = /^(?:\w+Store|Restaurant|Dentist|Physician|LegalService|Att
 var URL_KEYS = /* @__PURE__ */ new Set(["url", "logo", "image", "sameAs", "thumbnailUrl", "contentUrl", "embedUrl", "item", "@id"]);
 var DATE_KEYS = /* @__PURE__ */ new Set(["datePublished", "dateModified", "startDate", "endDate", "uploadDate", "datePosted", "validThrough", "priceValidUntil"]);
 var ISO = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
-var types = (n4) => (Array.isArray(n4["@type"]) ? n4["@type"] : n4["@type"] ? [n4["@type"]] : []).map(String);
+var types = (n) => (Array.isArray(n["@type"]) ? n["@type"] : n["@type"] ? [n["@type"]] : []).map(String);
 var ruleFor = (t) => {
   const k = RULES[t] ? t : ALIASES[t] ?? (LOCAL_SUBTYPES.test(t) ? "LocalBusiness" : "");
   return k && RULES[k] ? [k, RULES[k]] : null;
@@ -577,20 +588,20 @@ function checkJsonLd(blocks) {
       const ctx = JSON.stringify(r?.["@context"] ?? "");
       if (!/schema\.org/i.test(ctx)) issues.push({ level: "warning", where: `block ${bi + 1}`, message: "Missing or non-schema.org @context." });
     }
-    walk(data, (n4, path) => nodes.push({ n: n4, path: `block ${bi + 1}${path ? " \u203A " + path : ""}`, block: bi }));
+    walk(data, (n, path) => nodes.push({ n, path: `block ${bi + 1}${path ? " \u203A " + path : ""}`, block: bi }));
   });
   const ids = /* @__PURE__ */ new Map();
-  for (const { n: n4, block } of nodes) if (typeof n4["@id"] === "string" && types(n4).length) {
-    const arr = ids.get(n4["@id"]) ?? [];
-    arr.push({ types: types(n4), block });
-    ids.set(n4["@id"], arr);
+  for (const { n, block } of nodes) if (typeof n["@id"] === "string" && types(n).length) {
+    const arr = ids.get(n["@id"]) ?? [];
+    arr.push({ types: types(n), block });
+    ids.set(n["@id"], arr);
   }
   const typeCount = {};
-  for (const { n: n4, path } of nodes) {
-    const ts = types(n4);
-    const isRef = !ts.length && typeof n4["@id"] === "string" && Object.keys(n4).length === 1;
+  for (const { n, path } of nodes) {
+    const ts = types(n);
+    const isRef = !ts.length && typeof n["@id"] === "string" && Object.keys(n).length === 1;
     if (isRef) {
-      if (!ids.has(n4["@id"])) issues.push({ level: "warning", where: path, message: `References @id "${n4["@id"]}" but no node on the page has that @id.` });
+      if (!ids.has(n["@id"])) issues.push({ level: "warning", where: path, message: `References @id "${n["@id"]}" but no node on the page has that @id.` });
       continue;
     }
     for (const t of ts) {
@@ -600,19 +611,19 @@ function checkJsonLd(blocks) {
       const [rk, rule] = r;
       for (const req of rule.required) {
         const opts = Array.isArray(req) ? req : [req];
-        if (!opts.some((k) => present(n4[k]))) issues.push({ level: "error", where: `${path} (${t})`, message: `Missing required ${opts.length > 1 ? "one of " + opts.join(" / ") : opts[0]}.` });
+        if (!opts.some((k) => present(n[k]))) issues.push({ level: "error", where: `${path} (${t})`, message: `Missing required ${opts.length > 1 ? "one of " + opts.join(" / ") : opts[0]}.` });
       }
-      const missRec = (rule.recommended ?? []).filter((k) => !present(n4[k]));
+      const missRec = (rule.recommended ?? []).filter((k) => !present(n[k]));
       if (missRec.length && ts.length && !path.includes("itemListElement")) issues.push({ level: "info", where: `${path} (${t})`, message: `Recommended but missing: ${missRec.join(", ")}.` });
       if (rule.note) issues.push({ level: "info", where: `${path} (${t})`, message: rule.note });
-      if ((rk === "LocalBusiness" || rk === "Organization") && present(n4.aggregateRating))
+      if ((rk === "LocalBusiness" || rk === "Organization") && present(n.aggregateRating))
         issues.push({ level: "warning", where: `${path} (${t})`, message: "aggregateRating on your own business is a self-serving review; Google doesn't show stars for it." });
       if (rk === "AggregateRating") {
-        const v = parseFloat(n4.ratingValue), best = parseFloat(n4.bestRating ?? 5), worst = parseFloat(n4.worstRating ?? 1);
+        const v = parseFloat(n.ratingValue), best = parseFloat(n.bestRating ?? 5), worst = parseFloat(n.worstRating ?? 1);
         if (Number.isFinite(v) && (v > best || v < worst)) issues.push({ level: "error", where: path, message: `ratingValue ${v} is outside ${worst}\u2013${best}.` });
       }
     }
-    for (const [k, v] of Object.entries(n4)) {
+    for (const [k, v] of Object.entries(n)) {
       const vals = Array.isArray(v) ? v : [v];
       for (const x of vals) {
         if (URL_KEYS.has(k) && typeof x === "string" && x && !/^(https?:)?\/\//i.test(x) && !(k === "@id" && x.startsWith("#")) && !x.startsWith("data:"))
@@ -624,8 +635,8 @@ function checkJsonLd(blocks) {
     }
   }
   for (const t of ["Organization", "LocalBusiness", "WebSite", "Product", "Article", "BlogPosting", "FAQPage", "BreadcrumbList"]) {
-    const withType = nodes.filter(({ n: n4 }) => types(n4).includes(t) && Object.keys(n4).length > 2);
-    const distinct = new Set(withType.map(({ n: n4 }) => n4["@id"] ?? JSON.stringify(n4).slice(0, 200)));
+    const withType = nodes.filter(({ n }) => types(n).includes(t) && Object.keys(n).length > 2);
+    const distinct = new Set(withType.map(({ n }) => n["@id"] ?? JSON.stringify(n).slice(0, 200)));
     if (distinct.size > 1 && new Set(withType.map((w) => w.block)).size > 1)
       issues.push({ level: "warning", where: t, message: `${distinct.size} separate ${t} entities in ${new Set(withType.map((w) => w.block)).size} different blocks. Usually two plugins or snippets emitting schema; merge them under one @id.` });
   }
@@ -648,7 +659,7 @@ function schemaMarkdown(r) {
   ];
   if (!r.blocks && !r.microdata) out.push("", "No structured data found. At minimum, add Organization (or LocalBusiness) and WebSite on the homepage, and the matching type (Product, Article, Service) on each template.");
   const tc = Object.entries(r.typeCount).sort((a, b) => b[1] - a[1]);
-  if (tc.length) out.push("", "Types: " + tc.map(([t, n4]) => n4 > 1 ? `${t} \xD7${n4}` : t).join(", "));
+  if (tc.length) out.push("", "Types: " + tc.map(([t, n]) => n > 1 ? `${t} \xD7${n}` : t).join(", "));
   const list = (title, xs, max) => {
     if (!xs.length) return;
     out.push("", `### ${title} (${xs.length})`);
@@ -756,8 +767,8 @@ function parseCsv(text) {
   return rows;
 }
 var num = (v) => {
-  const n4 = parseFloat(String(v ?? "").replace(/[,%]/g, "").trim());
-  return Number.isFinite(n4) ? n4 : 0;
+  const n = parseFloat(String(v ?? "").replace(/[,%]/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
 };
 function rowsFromCsv(text) {
   const [head, ...data] = parseCsv(text);
@@ -918,7 +929,7 @@ function waybackMarkdown(robots, page) {
     if (!page.captures) out.push("No archived captures of this URL.");
     else {
       out.push(`${page.captures} days captured, from ${page.first} to ${page.last}. The content changed about ${page.changes} times between captures.`);
-      out.push("Captures by year: " + Object.entries(page.byYear).map(([y, n4]) => `${y}: ${n4}`).join(", "));
+      out.push("Captures by year: " + Object.entries(page.byYear).map(([y, n]) => `${y}: ${n}`).join(", "));
     }
   }
   out.push("", "Data: Internet Archive Wayback Machine.");
@@ -980,8 +991,8 @@ async function commonCrawlCheck(domain, f = fetch, crawls = 3) {
 function commonCrawlMarkdown(r, ccbotBlocked) {
   const out = [`## Common Crawl presence: ${r.domain}`, "", "| Crawl | In the crawl? | Pages seen (sample cap 50) |", "|---|---|---|"];
   for (const c of r.crawls) {
-    const n4 = c.found === null ? "index busy, couldn't check" : c.found ? c.capped ? "50+" : String(c.count) : "0";
-    out.push(`| ${c.name.replace(/^.*?(\d{4})/, "$1")} (${c.crawl}) | ${c.found === null ? "unknown" : c.found ? "yes" : "no"} | ${n4} |`);
+    const n = c.found === null ? "index busy, couldn't check" : c.found ? c.capped ? "50+" : String(c.count) : "0";
+    out.push(`| ${c.name.replace(/^.*?(\d{4})/, "$1")} (${c.crawl}) | ${c.found === null ? "unknown" : c.found ? "yes" : "no"} | ${n} |`);
   }
   const anyYes = r.crawls.some((c) => c.found);
   const latest = r.crawls[0];
@@ -998,7 +1009,7 @@ function commonCrawlMarkdown(r, ccbotBlocked) {
 
 // src/render.ts
 var BROWSER_UA2 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n4) => String.fromCodePoint(Number(n4))).replace(/&[a-z]+;/gi, " ");
+var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&[a-z]+;/gi, " ");
 var textOf = (html) => decode(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 var words = (s) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 function frameworks(html) {
@@ -1020,7 +1031,7 @@ function frameworks(html) {
     ["Framer", /framerusercontent|data-framer-/],
     ["HubSpot CMS", /hs-scripts|hubspotusercontent/]
   ];
-  return f.filter(([, re]) => re.test(html)).map(([n4]) => n4);
+  return f.filter(([, re]) => re.test(html)).map(([n]) => n);
 }
 async function renderCheck(url, f = fetch) {
   const r = await get(f, url, BROWSER_UA2, 2e4);
@@ -1036,7 +1047,7 @@ async function renderCheck(url, f = fetch) {
   const main = body.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i);
   const headings = [...body.matchAll(/<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi)].map((m) => ({ level: Number(m[1]), text: textOf(m[2]).slice(0, 120) })).filter((h) => h.text);
   const imgs = [...body.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
-  const attr2 = (re) => decode(html.match(re)?.[1] ?? "").trim();
+  const attr = (re) => decode(html.match(re)?.[1] ?? "").trim();
   const w = words(text);
   const fw = frameworks(html);
   const shell = w < 150 && (scriptKb > 50 || /<div[^>]+id=["'](root|app|__next|__nuxt|svelte)["'][^>]*>\s*<\/div>/i.test(html));
@@ -1051,15 +1062,15 @@ async function renderCheck(url, f = fetch) {
     mainWords: main ? words(textOf(main[2])) : null,
     noscriptWords: words(noscript),
     title: textOf(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ""),
-    metaDescription: attr2(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i) || attr2(/<meta\b[^>]*content=["']([^"']*)["'][^>]*name=["']description["']/i),
+    metaDescription: attr(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i) || attr(/<meta\b[^>]*content=["']([^"']*)["'][^>]*name=["']description["']/i),
     h1: headings.filter((h) => h.level === 1).map((h) => h.text),
     headings,
     links: (body.match(/<a\b[^>]*href=/gi) ?? []).length,
     images: imgs.length,
     imagesNoAlt: imgs.filter((t) => !/\salt=["'][^"']+["']/i.test(t)).length,
     jsonLdBlocks: (html.match(/application\/ld\+json/gi) ?? []).length,
-    lang: attr2(/<html\b[^>]*\slang=["']([^"']+)["']/i),
-    canonical: attr2(/<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i),
+    lang: attr(/<html\b[^>]*\slang=["']([^"']+)["']/i),
+    canonical: attr(/<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i),
     frameworks: fw,
     shell,
     gtm: /googletagmanager\.com\/gtm\.js|GTM-[A-Z0-9]{4,}/.test(html),
@@ -1293,8 +1304,8 @@ async function wikipediaCheck(domain, articleUrl, f = fetch, langs = LANGS) {
     const start = new Date(end);
     start.setUTCDate(1);
     start.setUTCMonth(start.getUTCMonth() - 11);
-    const fmt4 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
-    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt4(start)}/${fmt4(end)}`);
+    const fmt2 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
+    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt2(start)}/${fmt2(end)}`);
     out.pageviews = pv ? { title: decodeURIComponent(m[2]).replace(/_/g, " "), lang: m[1], months: (pv.items ?? []).map((i) => ({ month: String(i.timestamp).slice(0, 6), views: Number(i.views) || 0 })) } : null;
   }
   return out;
@@ -1311,12 +1322,12 @@ function wikipediaMarkdown(r, limit = 25) {
       ""
     );
   } else if (r.pageviews === null) L.push("Couldn't load page views for the brand article.", "");
-  const n4 = r.articles.length;
-  L.push(`### Articles linking to ${r.domain}`, n4 ? `${n4} article${n4 === 1 ? "" : "s"} across ${new Set(r.articles.map((a) => a.lang)).size} language${new Set(r.articles.map((a) => a.lang)).size === 1 ? "" : "s"} (checked ${r.checked.join(", ")}).` : `None found in ${r.checked.join(", ")} Wikipedia.`, "");
-  if (n4) {
+  const n = r.articles.length;
+  L.push(`### Articles linking to ${r.domain}`, n ? `${n} article${n === 1 ? "" : "s"} across ${new Set(r.articles.map((a) => a.lang)).size} language${new Set(r.articles.map((a) => a.lang)).size === 1 ? "" : "s"} (checked ${r.checked.join(", ")}).` : `None found in ${r.checked.join(", ")} Wikipedia.`, "");
+  if (n) {
     L.push("| Wiki | Article | Links to |", "|---|---|---|");
     for (const a of r.articles.slice(0, limit)) L.push(`| ${a.lang} | [${a.title.replace(/\|/g, "\\|")}](${a.url}) | ${a.links.slice(0, 2).map((u) => u.replace(/^https?:\/\//, "")).join(", ")}${a.links.length > 2 ? ` +${a.links.length - 2}` : ""} |`);
-    if (n4 > limit) L.push("", `\u2026and ${n4 - limit} more.`);
+    if (n > limit) L.push("", `\u2026and ${n - limit} more.`);
     L.push("");
   }
   if (r.failed.length) L.push(`Couldn't check: ${r.failed.join(", ")}.`, "");
@@ -1704,217 +1715,6 @@ function authorityMarkdown(rows, hasOpr) {
   return L.join("\n");
 }
 
-// src/gsc.ts
-import { createServer } from "node:http";
-import { createHash, createSign, randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
-import { spawn } from "node:child_process";
-var SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
-var TOKEN_URL = "https://oauth2.googleapis.com/token";
-var API = "https://searchconsole.googleapis.com/webmasters/v3";
-var TOKEN_FILE = join(homedir(), ".alchemyagent", "google-token.json");
-var GSC_SETUP_HELP = [
-  "Search Console needs your own Google credentials (they stay on your computer and are only sent to Google). Pick one:",
-  "",
-  "**A. Sign in with Google (recommended)**",
-  "1. In Google Cloud Console (https://console.cloud.google.com), create or pick a project and enable the **Google Search Console API**.",
-  "2. APIs & Services > OAuth consent screen: choose External, add your email as a test user.",
-  "3. APIs & Services > Credentials > Create credentials > OAuth client ID > **Desktop app**.",
-  "4. Paste the client ID and client secret into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure), then ask Claude to connect Search Console.",
-  "",
-  "**B. Service account**",
-  "1. Create a service account in the same project, download its JSON key.",
-  "2. In Search Console > Settings > Users and permissions, add the service account's email (Restricted is enough).",
-  "3. Choose the JSON file in AlchemyAgent's settings as the service account key."
-].join("\n");
-var cached = null;
-var b64url = (b) => Buffer.from(b).toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
-async function loadSaved() {
-  try {
-    return JSON.parse(await readFile(TOKEN_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-async function serviceAccountToken(file, f) {
-  let sa;
-  try {
-    sa = JSON.parse(await readFile(file, "utf8"));
-  } catch {
-    throw new Error(`Couldn't read the service account key file (${file}).`);
-  }
-  if (!sa.client_email || !sa.private_key) throw new Error("That file isn't a Google service account key (no client_email/private_key).");
-  const now = Math.floor(Date.now() / 1e3);
-  const head = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claim = b64url(JSON.stringify({ iss: sa.client_email, scope: SCOPE, aud: TOKEN_URL, iat: now, exp: now + 3600 }));
-  const sig = b64url(createSign("RSA-SHA256").update(`${head}.${claim}`).sign(sa.private_key));
-  const r = await f(TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${head}.${claim}.${sig}` }) });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`Google refused the service account (${body.error_description ?? body.error ?? r.status}).`);
-  return { token: body.access_token, exp: Date.now() + (body.expires_in - 60) * 1e3 };
-}
-async function accessToken(creds, f = fetch) {
-  const key = creds.serviceAccountFile ?? creds.clientId ?? "";
-  if (cached && cached.key === key && cached.exp > Date.now()) return cached.token;
-  if (creds.serviceAccountFile) {
-    const t = await serviceAccountToken(creds.serviceAccountFile, f);
-    cached = { ...t, key };
-    return t.token;
-  }
-  if (!creds.clientId || !creds.clientSecret) throw new Error(GSC_SETUP_HELP);
-  const saved = await loadSaved();
-  if (!saved || saved.client_id !== creds.clientId) throw new Error("Search Console isn't connected yet. Ask Claude to run gsc_connect to sign in with Google.");
-  const r = await f(TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: saved.refresh_token, client_id: creds.clientId, client_secret: creds.clientSecret }) });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error === "invalid_grant" ? "Your Google sign-in expired or was revoked (test-mode apps expire after 7 days). Run gsc_connect again." : `Google token refresh failed (${body.error ?? r.status}).`);
-  cached = { token: body.access_token, exp: Date.now() + (body.expires_in - 60) * 1e3, key };
-  return body.access_token;
-}
-var pending = null;
-function openBrowser(url) {
-  const cmd = platform() === "darwin" ? "open" : platform() === "win32" ? "cmd" : "xdg-open";
-  const args = platform() === "win32" ? ["/c", "start", "", url] : [url];
-  try {
-    spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
-  } catch {
-  }
-}
-var PAGE = (msg2) => `<!doctype html><meta charset="utf-8"><title>AlchemyAgent</title><body style="font:16px system-ui;padding:40px;max-width:560px;margin:auto"><h2>AlchemyAgent</h2><p>${msg2}</p></body>`;
-async function startConnect(creds, f = fetch, open = openBrowser) {
-  if (!creds.clientId || !creds.clientSecret) throw new Error(GSC_SETUP_HELP);
-  if (pending) return { url: pending.url, alreadyPending: true };
-  const verifier = b64url(randomBytes(32));
-  const state = b64url(randomBytes(16));
-  const server2 = createServer();
-  await new Promise((res) => server2.listen(0, "127.0.0.1", () => res()));
-  const port = server2.address().port;
-  const redirect = `http://127.0.0.1:${port}/callback`;
-  const url = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
-    client_id: creds.clientId,
-    redirect_uri: redirect,
-    response_type: "code",
-    scope: SCOPE,
-    access_type: "offline",
-    prompt: "consent",
-    code_challenge: b64url(createHash("sha256").update(verifier).digest()),
-    code_challenge_method: "S256",
-    state
-  });
-  const done = new Promise((resolve2, reject) => {
-    const timer = setTimeout(() => {
-      server2.close();
-      pending = null;
-      reject(new Error("Sign-in timed out"));
-    }, 10 * 60 * 1e3);
-    server2.on("request", async (req, res) => {
-      const u = new URL(req.url ?? "/", redirect);
-      if (u.pathname !== "/callback") {
-        res.writeHead(404).end();
-        return;
-      }
-      const finish = (code, msg2) => {
-        res.writeHead(code, { "content-type": "text/html; charset=utf-8" }).end(PAGE(msg2));
-        clearTimeout(timer);
-        server2.close();
-        pending = null;
-      };
-      if (u.searchParams.get("state") !== state) return finish(400, "This sign-in link doesn't match. Start again from Claude.");
-      if (u.searchParams.get("error")) {
-        finish(400, `Google said: ${u.searchParams.get("error")}. You can close this tab.`);
-        return reject(new Error(String(u.searchParams.get("error"))));
-      }
-      try {
-        const r = await f(TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code: u.searchParams.get("code") ?? "", client_id: creds.clientId, client_secret: creds.clientSecret, redirect_uri: redirect, code_verifier: verifier }) });
-        const body = await r.json();
-        if (!r.ok || !body.refresh_token) throw new Error(body.error_description ?? body.error ?? "no refresh token");
-        await mkdir(join(homedir(), ".alchemyagent"), { recursive: true, mode: 448 });
-        const saved = { refresh_token: body.refresh_token, client_id: creds.clientId, scope: SCOPE, saved_at: (/* @__PURE__ */ new Date()).toISOString() };
-        await writeFile(TOKEN_FILE, JSON.stringify(saved, null, 2), { mode: 384 });
-        await chmod(TOKEN_FILE, 384);
-        cached = { token: body.access_token, exp: Date.now() + (body.expires_in - 60) * 1e3, key: creds.clientId };
-        finish(200, "Search Console is connected. You can close this tab and go back to Claude.");
-        resolve2("ok");
-      } catch (e) {
-        finish(500, "Couldn't finish sign-in. Go back to Claude and try again.");
-        reject(e);
-      }
-    });
-  });
-  done.catch(() => {
-  });
-  pending = { server: server2, url, done };
-  open(url);
-  return { url, alreadyPending: false };
-}
-async function connectionStatus(creds) {
-  if (creds.serviceAccountFile) return `Using the service account key at ${creds.serviceAccountFile}.`;
-  if (!creds.clientId) return "Not set up.";
-  const saved = await loadSaved();
-  return saved && saved.client_id === creds.clientId ? `Connected (signed in ${saved.saved_at.slice(0, 10)}; token stored at ${TOKEN_FILE}).` : pending ? "Sign-in started; waiting for you to approve in the browser." : "Not connected yet.";
-}
-async function gsc(creds, f, path, body) {
-  const token = await accessToken(creds, f);
-  const r = await f(`${API}${path}`, { method: body ? "POST" : "GET", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body ? JSON.stringify(body) : void 0 });
-  const out = await r.json().catch(() => ({}));
-  if (r.status === 403) throw new Error(`Google says this account can't read that property (${out.error?.message ?? "403"}). Check the exact property URL with gsc_sites; Domain properties look like sc-domain:example.com.`);
-  if (!r.ok) throw new Error(`Search Console API error ${r.status}: ${out.error?.message ?? ""}`);
-  return out;
-}
-async function listSites(creds, f = fetch) {
-  return (await gsc(creds, f, "/sites")).siteEntry ?? [];
-}
-function matchProperty(sites, input) {
-  const exact = sites.find((s) => s.siteUrl === input);
-  if (exact) return exact.siteUrl;
-  const host4 = input.replace(/^sc-domain:/, "").replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
-  return sites.find((s) => s.siteUrl === `sc-domain:${host4}`)?.siteUrl ?? sites.find((s) => s.siteUrl.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "") === host4)?.siteUrl ?? null;
-}
-var ymd2 = (d) => d.toISOString().slice(0, 10);
-function dateRange(days, endOffset = 2) {
-  const end = new Date(Date.now() - endOffset * 864e5);
-  return { startDate: ymd2(new Date(end.getTime() - (days - 1) * 864e5)), endDate: ymd2(end) };
-}
-async function searchAnalytics(creds, siteUrl, opts, f = fetch) {
-  const filters = [
-    opts.queryContains && { dimension: "query", operator: "contains", expression: opts.queryContains },
-    opts.pageContains && { dimension: "page", operator: "contains", expression: opts.pageContains }
-  ].filter(Boolean);
-  const rows = [];
-  for (let start = 0; start < opts.rowLimit; start += 25e3) {
-    const body = {
-      startDate: opts.startDate,
-      endDate: opts.endDate,
-      dimensions: opts.dimensions,
-      rowLimit: Math.min(25e3, opts.rowLimit - start),
-      startRow: start,
-      type: opts.type ?? "web",
-      dataState: "final",
-      ...filters.length ? { dimensionFilterGroups: [{ filters }] } : {}
-    };
-    const out = await gsc(creds, f, `/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, body);
-    rows.push(...out.rows ?? []);
-    if ((out.rows ?? []).length < body.rowLimit) break;
-  }
-  return rows;
-}
-var n = (v) => Math.round(v).toLocaleString("en-US");
-function rowsMarkdown(siteUrl, range, dims, rows, prev, limit) {
-  const tot = (rs) => rs.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
-  const t = tot(rows);
-  const L = [`## Search Console: ${siteUrl}`, `${range.startDate} to ${range.endDate} \xB7 ${dims.join(" \xD7 ")} \xB7 ${rows.length.toLocaleString("en-US")} rows`, ""];
-  L.push(`Total in these rows: **${n(t.c)} clicks**, ${n(t.i)} impressions${prev ? ` (previous period: ${n(tot(prev).c)} clicks, ${n(tot(prev).i)} impressions)` : ""}. Rows Google hides for privacy aren't included, so totals can be lower than the Performance report.`, "");
-  const pmap = new Map((prev ?? []).map((r) => [r.keys.join("|"), r]));
-  L.push(`| ${dims.join(" | ")} | Clicks | Impr. | CTR | Pos.${prev ? " | Clicks \u0394 |" : " |"}`, `|${dims.map(() => "---").join("|")}|---|---|---|---|${prev ? "---|" : ""}`);
-  for (const r of rows.slice(0, limit)) {
-    const p = pmap.get(r.keys.join("|"));
-    L.push(`| ${r.keys.map((k) => k.replace(/\|/g, "\\|")).join(" | ")} | ${n(r.clicks)} | ${n(r.impressions)} | ${(r.ctr * 100).toFixed(1)}% | ${r.position.toFixed(1)}${prev ? ` | ${p ? (r.clicks - p.clicks >= 0 ? "+" : "") + n(r.clicks - p.clicks) : "new"} |` : " |"}`);
-  }
-  if (rows.length > limit) L.push("", `Showing ${limit} of ${rows.length.toLocaleString("en-US")} rows.`);
-  return L.join("\n");
-}
-
 // src/prompts.ts
 var msg = (text) => ({ messages: [{ role: "user", content: { type: "text", text } }] });
 var REPORT_RULES = [
@@ -1945,7 +1745,7 @@ function registerPrompts(server2, remote) {
       `6. entity_check and wikipedia_presence for the brand`,
       `7. authority_check for the domain`,
       local(`8. common_crawl_check, news_mentions and community_mentions for the brand`),
-      local(`9. If Search Console is connected (gsc_sites works), gsc_ai_queries for the last 90 days`),
+      local(`9. If Search Console is connected (gsc_sites works), gsc_ai_queries for the last 90 days; if GA4 is connected, ga4_report by ai_assistants`),
       "",
       REPORT_RULES,
       "- Group fixes under: Access (can AI reach it), Readability (can AI read it), Identity (does AI know who you are), Authority (does AI trust you), Speed.",
@@ -1963,9 +1763,9 @@ function registerPrompts(server2, remote) {
       "Help me connect my own data to AlchemyAgent.",
       "",
       "1. Run data_connections and show me what's connected.",
-      "2. Walk me through connecting the most valuable missing source first (Search Console, then Bing Webmaster Tools, then Cloudflare), one step at a time, waiting for me between steps.",
+      "2. Walk me through connecting the most valuable missing source first (Google: Search Console and GA4 in one sign-in, then Bing Webmaster Tools, then Cloudflare), one step at a time, waiting for me between steps.",
       "3. When Search Console has an OAuth client but no sign-in, run gsc_connect.",
-      "4. After each connection, run one quick check that uses it (gsc_sites, bing_webmaster, log_file_analysis) to confirm it works, and tell me one thing it found.",
+      "4. After each connection, run one quick check that uses it (gsc_sites, ga4_report, bing_webmaster, log_file_analysis) to confirm it works, and tell me one thing it found.",
       "Never ask me to paste a key into the chat: keys go in AlchemyAgent's settings."
     ].join("\n"))
   );
@@ -2081,14 +1881,14 @@ function registerPrompts(server2, remote) {
 }
 
 // src/alerts.ts
-import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "node:fs/promises";
-import { homedir as homedir2, platform as platform2 } from "node:os";
-import { join as join2 } from "node:path";
-import { createHash as createHash2 } from "node:crypto";
-import { spawn as spawn2 } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 var UA8 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-var ALERTS_DIR = () => join2(homedir2(), ".alchemyagent", "alerts");
-var hash = (s) => createHash2("sha1").update(s).digest("hex").slice(0, 16);
+var ALERTS_DIR = () => join(homedir(), ".alchemyagent", "alerts");
+var hash = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
 var decode2 = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/<[^>]+>/g, "").trim();
 var tag = (xml, name) => xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, "i"))?.[1] ?? "";
 var slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "brand";
@@ -2142,15 +1942,15 @@ async function linksTo(f, url, domain) {
 }
 async function loadState(brand) {
   try {
-    return JSON.parse(await readFile2(join2(ALERTS_DIR(), `${slug(brand)}.json`), "utf8"));
+    return JSON.parse(await readFile(join(ALERTS_DIR(), `${slug(brand)}.json`), "utf8"));
   } catch {
     return { brand, feeds: [], seen: {} };
   }
 }
 async function saveState(s) {
-  await mkdir2(ALERTS_DIR(), { recursive: true, mode: 448 });
+  await mkdir(ALERTS_DIR(), { recursive: true, mode: 448 });
   const entries = Object.entries(s.seen).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 5e3);
-  await writeFile2(join2(ALERTS_DIR(), `${slug(s.brand)}.json`), JSON.stringify({ ...s, seen: Object.fromEntries(entries) }, null, 2), { mode: 384 });
+  await writeFile(join(ALERTS_DIR(), `${slug(s.brand)}.json`), JSON.stringify({ ...s, seen: Object.fromEntries(entries) }, null, 2), { mode: 384 });
 }
 async function checkAlerts(opts, f = fetch) {
   const state = await loadState(opts.brand);
@@ -2205,10 +2005,10 @@ async function checkAlerts(opts, f = fetch) {
   return { brand: opts.brand, domain, firstRun, newItems: fresh, checked, errors, feeds: state.feeds.length, lastChecked: prev };
 }
 function notifyDesktop(title, body) {
-  if (platform2() !== "darwin") return;
-  const esc2 = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
+  if (platform() !== "darwin") return;
+  const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
   try {
-    spawn2("osascript", ["-e", `display notification "${esc2(body)}" with title "${esc2(title)}"`], { stdio: "ignore", detached: true }).unref();
+    spawn("osascript", ["-e", `display notification "${esc(body)}" with title "${esc(title)}"`], { stdio: "ignore", detached: true }).unref();
   } catch {
   }
 }
@@ -2235,920 +2035,6 @@ function alertsMarkdown(r, limit = 25) {
   if (!r.feeds) L.push("", "Tip: for wider coverage (blogs, forums, the whole web), create a Google Alert at google.com/alerts for your brand, set Show options > Deliver to: RSS feed, then give me the feed URL.");
   L.push("", "To get these automatically, schedule this check in Claude (for example every morning) with the daily_brand_alerts prompt.");
   return L.join("\n");
-}
-
-// src/cflogs.ts
-var API2 = "https://api.cloudflare.com/client/v4";
-var CF_TOKEN_HELP = "Log file analysis needs your own Cloudflare API token, and the site's DNS must be proxied through Cloudflare. In Cloudflare: My Profile > API Tokens > Create Token > Custom token, with permissions Zone > Analytics > Read and Zone > Zone > Read (add Account > Account Analytics > Read to include Cloudflare Web Analytics visits). Then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The token stays on your computer and is only sent to Cloudflare.";
-var CfError = class extends Error {
-};
-async function cf(f, token, path, init = {}) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 3e4);
-  let res;
-  try {
-    res = await f(`${API2}${path}`, { ...init, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json" }, signal: ctl.signal });
-  } catch {
-    throw new CfError("Couldn't reach the Cloudflare API. Try again in a minute.");
-  } finally {
-    clearTimeout(t);
-  }
-  const body = await res.json().catch(() => null);
-  if (res.status === 401 || res.status === 403) throw new CfError(`Cloudflare rejected the API token (HTTP ${res.status}). ${CF_TOKEN_HELP}`);
-  if (!res.ok || !body) throw new CfError(`Cloudflare API returned HTTP ${res.status}.`);
-  return body;
-}
-async function gql(f, token, query) {
-  const body = await cf(f, token, "/graphql", { method: "POST", body: JSON.stringify({ query }) });
-  if (body.errors?.length) return { error: String(body.errors[0]?.message ?? "GraphQL error") };
-  return { data: body.data };
-}
-function hostOf2(input) {
-  try {
-    return new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`).hostname.toLowerCase();
-  } catch {
-    return input.toLowerCase();
-  }
-}
-async function findZone(f, token, input) {
-  const parts = hostOf2(input).replace(/^www\./, "").split(".");
-  for (let i = 0; i < parts.length - 1; i++) {
-    const name = parts.slice(i).join(".");
-    const body = await cf(f, token, `/zones?name=${encodeURIComponent(name)}`);
-    const z = body.result?.[0];
-    if (z) return { id: z.id, name: z.name, plan: z.plan?.name ?? "", accountId: z.account?.id ?? "" };
-  }
-  throw new CfError(`No Cloudflare zone for ${hostOf2(input)} is visible to this token. Check the domain is on Cloudflare and the token includes that zone.`);
-}
-var PATTERNS = BOTS.filter((b) => !/no separate crawler/.test(b.purpose)).map((b) => ({
-  token: b.token,
-  owner: b.owner,
-  purpose: b.purpose,
-  re: b.token === "Bingbot" ? /bingbot/i : b.token === "Meta-ExternalAgent" ? /meta-external(agent|fetcher)/i : new RegExp(b.token.replace(/[-]/g, "\\-"), "i")
-}));
-function matchBot(ua) {
-  for (const p of PATTERNS) if (p.re.test(ua)) return p.token;
-  return null;
-}
-var AI_CATS = ["AI Crawler", "AI Search", "AI Assistant"];
-var BLOCKED = (s) => s === 403 || s === 429 || s === 503;
-var iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
-async function logReport(f, token, input, days = 30) {
-  const zone = await findZone(f, token, input);
-  const host4 = hostOf2(input);
-  const now = /* @__PURE__ */ new Date();
-  const windows = [...new Set([days, 30, 14, 7, 3, 1].filter((d) => d <= days))];
-  let used = 0, base = null, lastErr = "";
-  for (const d of windows) {
-    const s = iso(new Date(now.getTime() - d * 864e5));
-    const flt = (extra = "") => `{datetime_geq:"${s}",datetime_lt:"${iso(now)}"${extra}}`;
-    const q = `{viewer{zones(filter:{zoneTag:"${zone.id}"}){
-      total:httpRequestsAdaptiveGroups(limit:1,filter:${flt()}){count}
-      html:httpRequestsAdaptiveGroups(limit:1,filter:${flt(',edgeResponseContentTypeName:"html"')}){count}
-      cats:httpRequestsAdaptiveGroups(limit:30,orderBy:[count_DESC],filter:${flt()}){count dimensions{verifiedBotCategory}}
-      ua:httpRequestsAdaptiveGroups(limit:5000,orderBy:[count_DESC],filter:${flt(',edgeResponseContentTypeName:"html"')}){count dimensions{userAgent verifiedBotCategory edgeResponseStatus}}
-      pages:httpRequestsAdaptiveGroups(limit:15,orderBy:[count_DESC],filter:${flt(`,edgeResponseContentTypeName:"html",verifiedBotCategory_in:${JSON.stringify(AI_CATS)}`)}){count dimensions{clientRequestPath}}
-      errs:httpRequestsAdaptiveGroups(limit:15,orderBy:[count_DESC],filter:${flt(',verifiedBotCategory_neq:"",edgeResponseStatus_geq:400,edgeResponseStatus_lt:600')}){count dimensions{clientRequestPath edgeResponseStatus}}
-    }}}`;
-    const r = await gql(f, token, q);
-    if (r.data?.viewer?.zones?.[0]) {
-      used = d;
-      base = r.data.viewer.zones[0];
-      break;
-    }
-    lastErr = r.error ?? "no data";
-    if (!/time range|exceed|quota|limit|too far|retention|not allowed|can't|cannot/i.test(lastErr)) break;
-  }
-  if (!base) throw new CfError(`Cloudflare's analytics API didn't return request data for ${zone.name} (${lastErr}). The token needs Zone > Analytics > Read.`);
-  const stats = /* @__PURE__ */ new Map();
-  let htmlSampled = 0, browserHtml = 0;
-  for (const row of base.ua ?? []) {
-    const n4 = Number(row.count) || 0;
-    const ua = String(row.dimensions?.userAgent ?? "");
-    const cat = String(row.dimensions?.verifiedBotCategory ?? "");
-    const st = Number(row.dimensions?.edgeResponseStatus) || 0;
-    htmlSampled += n4;
-    const tok = matchBot(ua);
-    if (!tok) {
-      if (!cat && /^Mozilla\/5\.0 \(/.test(ua) && /AppleWebKit|Gecko\//.test(ua) && !/bot|crawl|spider|headless|preview/i.test(ua) && st < 400) browserHtml += n4;
-      continue;
-    }
-    const p = PATTERNS.find((x) => x.token === tok);
-    const s = stats.get(tok) ?? { token: tok, owner: p.owner, purpose: p.purpose, requests: 0, verified: 0, served: 0, blocked: 0, verifiedBlocked: 0, verifiedServed: 0 };
-    s.requests += n4;
-    if (cat) s.verified += n4;
-    if (st > 0 && st < 400) {
-      s.served += n4;
-      if (cat) s.verifiedServed += n4;
-    }
-    if (BLOCKED(st)) {
-      s.blocked += n4;
-      if (cat) s.verifiedBlocked += n4;
-    }
-    stats.set(tok, s);
-  }
-  let rum = null, rumNote;
-  if (zone.accountId) {
-    const s = iso(new Date(now.getTime() - used * 864e5));
-    const r = await gql(f, token, `{viewer{accounts(filter:{accountTag:"${zone.accountId}"}){rumPageloadEventsAdaptiveGroups(limit:1,filter:{datetime_geq:"${s}",datetime_lt:"${iso(now)}",requestHost:"${host4}"}){count sum{visits}}}}}`).catch(() => ({ error: "unavailable" }));
-    const g = r.data?.viewer?.accounts?.[0]?.rumPageloadEventsAdaptiveGroups?.[0];
-    if (g && (Number(g.count) || Number(g.sum?.visits))) rum = { visits: Number(g.sum?.visits) || 0, pageloads: Number(g.count) || 0 };
-    else rumNote = r.error ? "Cloudflare Web Analytics wasn't readable with this token (add Account > Account Analytics > Read)." : `Cloudflare Web Analytics has no data for ${host4} (it's off or uses a different hostname).`;
-  }
-  const num2 = (x) => Number(x?.[0]?.count) || 0;
-  return {
-    zone,
-    host: host4,
-    days: used,
-    requested: days,
-    from: iso(new Date(now.getTime() - used * 864e5)).slice(0, 10),
-    to: iso(now).slice(0, 10),
-    total: num2(base.total),
-    html: num2(base.html),
-    htmlSampled,
-    categories: (base.cats ?? []).filter((c) => c.dimensions?.verifiedBotCategory).map((c) => ({ category: c.dimensions.verifiedBotCategory, requests: Number(c.count) || 0 })),
-    bots: [...stats.values()].sort((a, b) => b.requests - a.requests),
-    aiPages: (base.pages ?? []).map((p) => ({ path: String(p.dimensions?.clientRequestPath ?? ""), requests: Number(p.count) || 0 })),
-    botErrors: (base.errs ?? []).map((p) => ({ path: String(p.dimensions?.clientRequestPath ?? ""), status: Number(p.dimensions?.edgeResponseStatus) || 0, requests: Number(p.count) || 0 })),
-    browserHtml,
-    rum,
-    rumNote
-  };
-}
-var n2 = (x) => x.toLocaleString("en-US");
-var pct = (a, b) => b ? `${Math.round(a / b * 100)}%` : "\u2013";
-var cell = (s) => s.replace(/\|/g, "\\|").slice(0, 80);
-function logMarkdown(r, analytics) {
-  const L = [];
-  L.push(`# Log file analysis for AI search: ${r.host}`, "");
-  L.push(`Cloudflare zone ${r.zone.name}${r.zone.plan ? ` (${r.zone.plan})` : ""}, ${r.from} to ${r.to} (${r.days} day${r.days === 1 ? "" : "s"}${r.days < r.requested ? `; your plan's analytics only go back ${r.days} days` : ""}). Counts are from Cloudflare's sampled request analytics.`, "");
-  L.push(`- Requests: ${n2(r.total)} total, ${n2(r.html)} for HTML pages`);
-  const ai = r.categories.filter((c) => AI_CATS.includes(c.category));
-  const aiTotal = ai.reduce((a, c) => a + c.requests, 0);
-  L.push(`- Verified AI bots (Cloudflare categories AI Crawler, AI Search, AI Assistant): ${n2(aiTotal)} requests`, "");
-  if (r.categories.length) {
-    L.push("## Verified bots by category", "", "| Category | Requests |", "|---|---:|");
-    for (const c of r.categories.slice(0, 12)) L.push(`| ${c.category} | ${n2(c.requests)} |`);
-    L.push("");
-  }
-  if (r.bots.length) {
-    L.push("## AI and search crawlers on your HTML pages", "", "Requests that use each crawler's name. Verified means Cloudflare confirmed the request came from that operator. Unverified requests that were still served are the ones to look at: either fakes getting through, or a real operator Cloudflare doesn't verify.", "", "| Crawler | Owner | Requests | Verified | Verified, served | Unverified, served | Blocked/challenged |", "|---|---|---:|---:|---:|---:|---:|");
-    for (const b of r.bots) L.push(`| ${b.token} | ${b.owner} | ${n2(b.requests)} | ${pct(b.verified, b.requests)} | ${n2(b.verifiedServed)} | ${n2(b.served - b.verifiedServed)} | ${n2(b.blocked)} |`);
-    L.push("");
-  }
-  const findings = [];
-  const realBlocked = r.bots.filter((b) => b.verifiedBlocked > 0).sort((a, b) => b.verifiedBlocked - a.verifiedBlocked);
-  if (realBlocked.length) findings.push(`**Real crawlers are being blocked.** Verified requests got 403/429/503 from: ${realBlocked.map((b) => `${b.token} (${n2(b.verifiedBlocked)})`).join(", ")}. Check your WAF, Bot Fight Mode and rate-limit rules: these are citations you're turning away.`);
-  const leaks = r.bots.map((b) => ({ b, u: b.served - b.verifiedServed })).filter((x) => x.u >= 50).sort((a, b) => b.u - a.u);
-  const fakeTotal = r.bots.reduce((a, b) => a + (b.requests - b.verified), 0);
-  if (leaks.length) findings.push(`**Unverified requests using crawler names got through:** ${leaks.slice(0, 6).map((x) => `${x.b.token} (${n2(x.u)})`).join(", ")}. Some are scrapers borrowing the name; some may be real operators that Cloudflare doesn't verify. Before allowing a crawler by name, match its source network to the operator's published IP ranges (ai_crawler_check lists them). Monitoring tools that send crawler user agents, including your own, show up here too.`);
-  else if (fakeTotal >= 50) findings.push(`**Fake crawlers are being stopped:** ${n2(fakeTotal)} unverified requests used AI or search crawler names, and almost none were served.`);
-  if (r.botErrors.length) findings.push(`**Crawler-only errors:** verified bots hit ${n2(r.botErrors.reduce((a, e) => a + e.requests, 0))} error responses on the paths below. Broken links, redirects to nowhere and timeouts often show up here first, before any visitor reports them.`);
-  if (aiTotal === 0) findings.push("**No verified AI bot traffic** in this window. Check that robots.txt, your firewall and Cloudflare's AI crawler settings (AI Crawl Control) aren't blocking them, and that your key pages are linked and in your sitemap.");
-  if (findings.length) L.push("## What stands out", "", ...findings.map((x) => `- ${x}`), "");
-  if (r.aiPages.length) {
-    L.push("## Pages AI bots read most", "", "Compare this with the pages you want cited. A page that never appears here can't be quoted.", "", "| Page | Requests |", "|---|---:|");
-    for (const p of r.aiPages) L.push(`| ${cell(p.path)} | ${n2(p.requests)} |`);
-    L.push("");
-  }
-  if (r.botErrors.length) {
-    L.push("## Errors served to verified bots", "", "| Page | Status | Requests |", "|---|---:|---:|");
-    for (const e of r.botErrors) L.push(`| ${cell(e.path)} | ${e.status} | ${n2(e.requests)} |`);
-    L.push("");
-  }
-  L.push("## Logs vs analytics", "");
-  L.push(`- HTML page requests from browser-like user agents that aren't known bots: ${n2(r.browserHtml)}. This still includes scrapers that pretend to be browsers, so treat it as a ceiling for human page views.`);
-  if (r.rum) L.push(`- Cloudflare Web Analytics (cookieless script): ${n2(r.rum.visits)} visits, ${n2(r.rum.pageloads)} page loads. This is usually the closest count of real people.`);
-  else if (r.rumNote) L.push(`- ${r.rumNote}`);
-  if (analytics) L.push(`- ${analytics.label}: ${n2(analytics.sessions)}. Analytics only count visitors who run the tag and accept cookies; AI crawlers never appear there.`);
-  L.push(`- Verified AI bot requests: ${n2(aiTotal)}. These appear only in logs.`, "");
-  L.push("Data: Cloudflare GraphQL Analytics API (https://developers.cloudflare.com/analytics/graphql-api/). Your token was used only to call Cloudflare.");
-  return L.join("\n");
-}
-
-// src/entitymap.ts
-var UA9 = "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)";
-var CORE_TYPES = /* @__PURE__ */ new Set(["Concept", "ProprietaryTerm", "Methodology", "Metric", "Taxonomy", "Person", "Organization", "SoftwareProduct", "PhysicalProduct", "Service", "Platform", "Place", "Event", "Standard", "Regulation"]);
-var TIER1 = ["INSTANCE_OF", "PART_OF", "INCLUDES", "DEPENDS_ON", "REQUIRES", "MEASURES", "PRODUCED_BY", "REGULATED_BY", "AUTHORED_BY", "AFFILIATED_WITH", "COVERS"];
-var TIER2 = ["RELATES_TO", "PRECEDES", "ENABLES", "PREVENTS", "CONFLICTS_WITH", "DESCRIBED_BY", "OFFERS"];
-var TIER3 = ["IMPROVES", "DEGRADES", "LEADS_TO", "SUITED_FOR", "TARGETS", "ACHIEVES"];
-var STANDARD = /* @__PURE__ */ new Set([...TIER1, ...TIER2, ...TIER3]);
-var STATUSES = /* @__PURE__ */ new Set(["self-declared", "generator-draft", "third-party-verified"]);
-var str = (v) => typeof v === "string" && v.trim().length > 0;
-var host3 = (u) => {
-  try {
-    return new URL(u).hostname.toLowerCase();
-  } catch {
-    return "";
-  }
-};
-function validateEntityMap(doc, now = Date.now()) {
-  const issues = [];
-  const err = (path, msg2) => issues.push({ level: "error", path, msg: msg2 });
-  const warn = (path, msg2) => issues.push({ level: "warning", path, msg: msg2 });
-  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-    err("root", "The file isn't a JSON object.");
-    return { issues, entities: 0, chunks: 0, relations: 0 };
-  }
-  if (doc.version !== "1.0") err("version", `Must be "1.0" (found ${JSON.stringify(doc.version)}).`);
-  if (doc.schema !== "https://entitymap.org/spec/v1.0") err("schema", 'Must be "https://entitymap.org/spec/v1.0".');
-  const pub = doc.publisher;
-  const pubName = typeof pub?.name === "string" ? pub.name : "";
-  if (!str(pubName)) err("publisher.name", "Missing. It's the brand name AI tools will use for attribution.");
-  else if (/^[a-z0-9-]+\.[a-z.]{2,}$/i.test(pubName.trim())) err("publisher.name", `"${pubName}" looks like a domain. Use the canonical brand name.`);
-  if (!str(pub?.url)) err("publisher.url", "Missing the publisher's canonical URL.");
-  if (!str(doc.generated) || isNaN(Date.parse(doc.generated))) err("generated", "Missing or not an ISO 8601 timestamp.");
-  else if (now - Date.parse(doc.generated) > 30 * 864e5) warn("generated", `Last generated ${doc.generated.slice(0, 10)}, more than 30 days ago. Consumers treat that as possibly stale; rebuild after content changes.`);
-  if (doc.verificationStatus != null && !STATUSES.has(doc.verificationStatus)) err("verificationStatus", `Must be one of ${[...STATUSES].join(", ")}.`);
-  if (doc.verificationStatus === "third-party-verified" && !doc.certification) warn("verificationStatus", '"third-party-verified" without a certification field is treated as "self-declared".');
-  if (doc.certification?.url) {
-    const m = /^https:\/\/entitymap\.org\/certified\/([^/]+)\/([0-9a-f]{32})$/.exec(String(doc.certification.url));
-    if (!m) err("certification.url", "Must look like https://entitymap.org/certified/{domain}/{32-hex token}.");
-    else if (m[1].toLowerCase() !== host3(String(pub?.url ?? ""))) err("certification.url", `Domain segment ${m[1]} doesn't match publisher.url's hostname.`);
-  }
-  const customPreds = new Set((doc.vocabulary?.predicates ?? []).map(String));
-  for (const p of customPreds) {
-    if (p !== p.toUpperCase()) err("vocabulary.predicates", `Custom predicate ${p} must be uppercase.`);
-    if (STANDARD.has(p)) err("vocabulary.predicates", `Custom predicate ${p} conflicts with a standard predicate.`);
-  }
-  const ents = Array.isArray(doc.entities) ? doc.entities : [];
-  if (!ents.length) err("entities", "Needs at least one entity.");
-  if (ents.length > 200 && !doc.shards) warn("entities", `${ents.length} entities. The spec says maps over 200 entities SHOULD be sharded.`);
-  const byId = /* @__PURE__ */ new Map();
-  const chunkIds = /* @__PURE__ */ new Set();
-  let chunks = 0, relations = 0, relatesTo = 0;
-  const pairs = /* @__PURE__ */ new Map();
-  ents.forEach((e, i) => {
-    const at = `entities[${i}]${str(e?.name) ? ` (${e.name})` : ""}`;
-    if (!str(e?.entityId)) err(at, "Missing entityId.");
-    else if (byId.has(e.entityId)) err(at, `Duplicate entityId ${e.entityId}.`);
-    else byId.set(e.entityId, e);
-    const t = String(e?.["@type"] ?? "");
-    if (!t) err(at, "Missing @type.");
-    else if (!CORE_TYPES.has(t) && !/^[a-z][\w-]*:[A-Z]\w*$/.test(t)) err(at, `@type "${t}" isn't a v1.0 core type or a namespaced custom type (e.g. "acme:MetricComponent").`);
-    if (!str(e?.name)) err(at, "Missing name.");
-    if (!str(e?.description)) err(at, "Missing description.");
-    if ((e?.status === "deprecated" || e?.status === "merged") && !str(e?.replacedBy)) err(at, `status "${e.status}" needs replacedBy.`);
-    if (t === "Concept" && !(Array.isArray(e?.sameAs) && e.sameAs.length)) warn(at, "Concept without sameAs. Linking Wikidata or Wikipedia helps AI tools match it to general knowledge.");
-    const hc = Array.isArray(e?.hasChunks) ? e.hasChunks : [];
-    if (!hc.length) err(at, "Needs at least one chunk in hasChunks.");
-    if (hc.length > 5) err(`${at}.hasChunks`, `${hc.length} chunks; the maximum is 5.`);
-    hc.forEach((c, j) => {
-      chunks++;
-      const cat = `${at}.hasChunks[${j}]`;
-      for (const k of ["chunkId", "text", "sourceUrl", "pageTitle", "publisher"]) if (!str(c?.[k])) err(cat, `Missing ${k}.`);
-      if (str(c?.chunkId)) {
-        if (chunkIds.has(c.chunkId)) err(cat, `Duplicate chunkId ${c.chunkId}.`);
-        chunkIds.add(c.chunkId);
-      }
-      if (str(c?.text) && c.text.length > 600) err(cat, `Text is ${c.text.length} characters; the maximum is 600.`);
-      if (str(c?.publisher) && pubName && c.publisher !== pubName) err(cat, `publisher "${c.publisher}" doesn't exactly match publisher.name "${pubName}" (case and spacing count).`);
-      if (str(c?.sourceUrl) && !/^https?:\/\//.test(c.sourceUrl)) err(cat, "sourceUrl must be an absolute URL.");
-    });
-  });
-  ents.forEach((e, i) => {
-    const at = `entities[${i}]${str(e?.name) ? ` (${e.name})` : ""}`;
-    const t = String(e?.["@type"] ?? "");
-    (Array.isArray(e?.relations) ? e.relations : []).forEach((r, k) => {
-      relations++;
-      const rat = `${at}.relations[${k}]`;
-      const p = String(r?.predicate ?? "");
-      if (!p) {
-        err(rat, "Missing predicate.");
-        return;
-      }
-      if (!STANDARD.has(p) && !customPreds.has(p)) err(rat, `Predicate ${p} isn't in the v1.0 vocabulary or declared in vocabulary.predicates.`);
-      if (!str(r?.targetName)) err(rat, "Missing targetName.");
-      if (TIER3.includes(p) && !str(r?.confidence)) err(rat, `${p} is an interpretive predicate and needs a confidence field.`);
-      if (p === "MEASURES" && t !== "Metric") err(rat, "MEASURES can only come from a Metric entity.");
-      if (p === "AFFILIATED_WITH" && t !== "Person") err(rat, "AFFILIATED_WITH can only come from a Person entity.");
-      if (p === "COVERS" && !["Concept", "ProprietaryTerm", "Taxonomy"].includes(t)) err(rat, "COVERS can only come from a Concept, ProprietaryTerm or Taxonomy entity.");
-      if (p === "RELATES_TO") relatesTo++;
-      if (str(r?.targetId)) {
-        if (!byId.has(r.targetId) && !/^https?:\/\//.test(r.targetId)) warn(rat, `targetId ${r.targetId} isn't an entity in this file.`);
-        const key = `${e?.entityId}>${r.targetId}`;
-        const set = pairs.get(key) ?? /* @__PURE__ */ new Set();
-        set.add(p);
-        pairs.set(key, set);
-      }
-    });
-  });
-  const has = (a, b, p) => pairs.get(`${a}>${b}`)?.has(p);
-  const seen = /* @__PURE__ */ new Set();
-  for (const key of pairs.keys()) {
-    const [a, b] = key.split(">");
-    const id = [a, b].sort().join("|");
-    if (seen.has(id)) continue;
-    seen.add(id);
-    if (has(a, b, "PART_OF") && has(b, a, "INCLUDES") || has(a, b, "INCLUDES") && has(b, a, "PART_OF")) err(`${a} / ${b}`, "PART_OF and INCLUDES are declared in both directions. Inverses are implicit; keep one.");
-    for (const [x, y] of [["IMPROVES", "DEGRADES"], ["ENABLES", "PREVENTS"]]) {
-      if ((has(a, b, x) || has(b, a, x)) && (has(a, b, y) || has(b, a, y))) err(`${a} / ${b}`, `${x} and ${y} are both declared between the same pair.`);
-    }
-  }
-  if (relations >= 10 && relatesTo / relations > 0.2) warn("relations", `RELATES_TO is ${Math.round(relatesTo / relations * 100)}% of relations. It's the predicate of last resort; prefer a specific one where it fits.`);
-  if (doc.verificationStatus === "generator-draft") warn("verificationStatus", '"generator-draft": fine for unreviewed output. Switch to "self-declared" after a person has reviewed the map.');
-  return { issues, entities: ents.length, chunks, relations };
-}
-function checkHtml(html, pubName) {
-  const quotes = html.match(/<blockquote\b[^>]*>/gi) ?? [];
-  const withPub = quotes.filter((q) => /data-publisher=/i.test(q)).length;
-  const cites = (html.match(/<cite\b[^>]*>[\s\S]*?<\/cite>/gi) ?? []).map((c) => c.replace(/<[^>]+>/g, " "));
-  const citeOk = cites.filter((c) => c.toLowerCase().includes(`published by ${pubName}`.toLowerCase())).length;
-  return [
-    { ok: /<link\b[^>]*rel=["']?alternate["']?[^>]*application\/json|<link\b[^>]*application\/json[^>]*rel=["']?alternate/i.test(html), label: 'Links to entitymap.json with <link rel="alternate" type="application/json">' },
-    { ok: /<script\b[^>]*application\/ld\+json/i.test(html), label: "Embeds JSON-LD for entities" },
-    { ok: quotes.length > 0 && withPub === quotes.length, label: `data-publisher on every chunk blockquote (${withPub}/${quotes.length})` },
-    { ok: cites.length > 0 && citeOk === cites.length, label: `Visible "published by ${pubName}" in every <cite> (${citeOk}/${cites.length})` },
-    { ok: !/<meta\b[^>]*name=["']?robots["']?[^>]*noindex/i.test(html), label: "No noindex" }
-  ];
-}
-async function get3(f, url) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 2e4);
-  try {
-    const r = await f(url, { headers: { "user-agent": UA9, accept: "application/json, text/html;q=0.9" }, redirect: "follow", signal: ctl.signal });
-    return { status: r.status, text: await r.text() };
-  } catch {
-    return { status: 0, text: "" };
-  } finally {
-    clearTimeout(t);
-  }
-}
-async function entitymapCheck(input, f = fetch, jsonText) {
-  let origin = "";
-  try {
-    origin = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`).origin;
-  } catch {
-  }
-  const jsonUrl = origin ? `${origin}/entitymap.json` : "(pasted JSON)";
-  let text = jsonText, status;
-  if (!text) {
-    const r = await get3(f, jsonUrl);
-    status = r.status;
-    if (r.status !== 200) return { jsonUrl, found: false, status: r.status, entities: 0, chunks: 0, relations: 0, issues: [] };
-    text = r.text;
-  }
-  let doc;
-  try {
-    doc = JSON.parse(text);
-  } catch (e) {
-    return { jsonUrl, found: true, status, entities: 0, chunks: 0, relations: 0, issues: [{ level: "error", path: "root", msg: `Not valid JSON (${e.message}).` }] };
-  }
-  const v = validateEntityMap(doc);
-  const res = { jsonUrl, found: true, status, ...v, generated: doc.generated, verificationStatus: doc.verificationStatus };
-  if (origin) {
-    const h = await get3(f, `${origin}/entitymap.html`);
-    res.html = { url: `${origin}/entitymap.html`, status: h.status, checks: h.status === 200 ? checkHtml(h.text, String(doc?.publisher?.name ?? "")) : [] };
-  }
-  return res;
-}
-function entitymapMarkdown(r, max = 25) {
-  const L = [`# EntityMap check: ${r.jsonUrl}`, ""];
-  if (!r.found) {
-    L.push(`No EntityMap found (HTTP ${r.status || "no response"}).`, "", "EntityMap is an open standard for publishing a site's entities, their relationships and source passages for AI systems: entitymap.json at the domain root, plus a generated entitymap.html. Spec: https://entitymap.org/spec/v1.0");
-    return L.join("\n");
-  }
-  const errs = r.issues.filter((i) => i.level === "error"), warns = r.issues.filter((i) => i.level === "warning");
-  L.push(`**${errs.length ? `Not valid: ${errs.length} error${errs.length === 1 ? "" : "s"}` : "Valid against the v1.0 rules checked"}**, ${warns.length} warning${warns.length === 1 ? "" : "s"}.`, "");
-  L.push(`- ${r.entities} entities, ${r.chunks} chunks, ${r.relations} relations`);
-  if (r.generated) L.push(`- Generated ${r.generated}`);
-  if (r.verificationStatus) L.push(`- verificationStatus: ${r.verificationStatus}`);
-  L.push("");
-  const list = (title, xs) => {
-    if (!xs.length) return;
-    L.push(`## ${title}`, "");
-    for (const i of xs.slice(0, max)) L.push(`- \`${i.path}\`: ${i.msg}`);
-    if (xs.length > max) L.push(`- \u2026and ${xs.length - max} more`);
-    L.push("");
-  };
-  list("Errors", errs);
-  list("Warnings", warns);
-  if (r.html) {
-    L.push("## HTML companion", "");
-    if (r.html.status !== 200) L.push(`- ${r.html.url}: HTTP ${r.html.status || "no response"}. The spec expects an entitymap.html generated from the JSON.`);
-    else for (const c of r.html.checks) L.push(`- ${c.ok ? "\u2713" : "\u2717"} ${c.label}`);
-    L.push("");
-  }
-  L.push("Checked against EntityMap v1.0 (https://entitymap.org/spec/v1.0). The official validator is https://entitymap.org/validate.");
-  return L.join("\n");
-}
-
-// src/images.ts
-var UA10 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 AlchemyAgent/0.3";
-var KB = 1024;
-var attr = (tag2, name) => {
-  const m = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag2);
-  return m ? m[2] ?? m[3] ?? m[4] ?? "" : null;
-};
-function extractImages(html, base) {
-  const abs = (u) => {
-    try {
-      return new URL(u.trim(), base).href;
-    } catch {
-      return "";
-    }
-  };
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  const page = (() => {
-    try {
-      const u = new URL(base);
-      return u.origin + u.pathname;
-    } catch {
-      return base;
-    }
-  })();
-  const add = (i) => {
-    if (!i.url || i.url.startsWith("data:") || seen.has(i.url) || i.url.split(/[?#]/)[0] === page) return;
-    seen.add(i.url);
-    out.push(i);
-  };
-  const body = html.replace(/<!--[\s\S]*?-->/g, "").replace(/<noscript[\s\S]*?<\/noscript>/gi, "");
-  let n4 = 0;
-  for (const m of body.matchAll(/<(img|source|video)\b[^>]*>/gi)) {
-    const tag2 = m[0], name = m[1].toLowerCase();
-    if (name === "img") {
-      const src = attr(tag2, "data-lazy-src") || attr(tag2, "data-src") || attr(tag2, "src") || "";
-      add({ url: abs(src), kind: "img", index: n4++, alt: attr(tag2, "alt"), width: attr(tag2, "width"), height: attr(tag2, "height"), loading: attr(tag2, "loading") ?? (attr(tag2, "data-src") || attr(tag2, "data-lazy-src") ? "lazy" : null), fetchpriority: attr(tag2, "fetchpriority"), srcset: !!(attr(tag2, "srcset") || attr(tag2, "data-srcset")) });
-    } else if (name === "source") {
-      const ss = attr(tag2, "srcset") || attr(tag2, "data-srcset");
-      const src = attr(tag2, "src");
-      if (src && /video|mp4|webm/i.test(attr(tag2, "type") ?? src)) add({ url: abs(src), kind: "video", index: n4++, srcset: false });
-      else if (ss) add({ url: abs(ss.split(",")[0].trim().split(/\s+/)[0]), kind: "source", index: n4++, srcset: true });
-    } else {
-      const poster = attr(tag2, "poster");
-      const autoplay = /\sautoplay\b/i.test(tag2);
-      const src = attr(tag2, "src");
-      if (poster) add({ url: abs(poster), kind: "poster", index: n4++, srcset: false });
-      if (src) add({ url: abs(src), kind: "video", index: n4++, srcset: false, autoplay, hasPoster: !!poster });
-    }
-  }
-  for (const m of body.matchAll(/<video\b([^>]*)>([\s\S]*?)<\/video>/gi)) {
-    const autoplay = /\sautoplay\b/i.test(m[1]), hasPoster = !!attr(`<v ${m[1]}>`, "poster");
-    for (const s of m[2].matchAll(/<source\b[^>]*>/gi)) {
-      const u = abs(attr(s[0], "src") ?? "");
-      const v = out.find((x) => x.url === u && x.kind === "video");
-      if (v) {
-        v.autoplay = autoplay;
-        v.hasPoster = hasPoster;
-      }
-    }
-  }
-  const og = /<meta\b[^>]*property=["']og:image["'][^>]*>/i.exec(body);
-  const ogUrl = og ? abs(attr(og[0], "content") ?? "") : "";
-  if (ogUrl) out.push({ url: ogUrl, kind: "og", index: -1, srcset: false });
-  return out.filter((i) => i.url || i.kind === "video");
-}
-async function measure(f, img) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 2e4);
-  try {
-    const isSvg = /\.svg(\?|#|$)/i.test(img.url);
-    const res = await f(img.url, { method: img.kind === "video" ? "HEAD" : "GET", headers: { "user-agent": UA10, accept: "image/avif,image/webp,image/*,*/*;q=0.8" }, redirect: "follow", signal: ctl.signal });
-    img.status = res.status;
-    img.type = (res.headers.get("content-type") ?? "").split(";")[0].trim();
-    if (img.kind === "video") {
-      img.bytes = Number(res.headers.get("content-length")) || void 0;
-      return;
-    }
-    if (/^text\/html/.test(img.type)) {
-      img.status = -1;
-      return;
-    }
-    if (isSvg || img.type === "image/svg+xml") {
-      const text = await res.text();
-      img.bytes = new TextEncoder().encode(text).length;
-      let emb = 0;
-      for (const m of text.matchAll(/data:image\/(?:png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)/g)) emb += Math.floor(m[1].replace(/\s/g, "").length * 3 / 4);
-      if (emb) img.embeddedRasterBytes = emb;
-    } else {
-      img.bytes = (await res.arrayBuffer()).byteLength;
-    }
-  } catch {
-    img.status = 0;
-  } finally {
-    clearTimeout(t);
-  }
-}
-var fmt2 = (b) => b == null ? "?" : b >= KB * KB ? `${(b / KB / KB).toFixed(1)} MB` : `${Math.round(b / KB)} KB`;
-var short = (u) => {
-  try {
-    const x = new URL(u);
-    return x.pathname.split("/").filter(Boolean).slice(-2).join("/") || x.hostname;
-  } catch {
-    return u;
-  }
-};
-async function imageAudit(input, f = fetch, maxImages = 40) {
-  const url = /^https?:\/\//i.test(input) ? input : `https://${input}`;
-  let res;
-  try {
-    res = await f(url, { headers: { "user-agent": UA10, accept: "text/html" }, redirect: "follow" });
-  } catch {
-    throw new Error(`Couldn't load ${url}.`);
-  }
-  const html = await res.text();
-  if (res.status !== 200) throw new Error(`${url} returned HTTP ${res.status}${/cf-mitigated|challenge/i.test(html) ? " (a bot challenge)" : ""}.`);
-  const images = extractImages(html, res.url || url).slice(0, maxImages);
-  const queue = images.filter((i) => i.url);
-  await Promise.all(Array.from({ length: 6 }, async () => {
-    for (let i = queue.shift(); i; i = queue.shift()) await measure(f, i);
-  }));
-  const page = images.filter((i) => i.kind !== "og" && i.kind !== "video" && i.status !== -1);
-  const totalBytes = page.reduce((a, i) => a + (i.bytes ?? 0), 0);
-  const findings = [];
-  const push = (severity, title, detail, xs, label) => {
-    if (xs.length) findings.push({ severity, title, detail, items: xs.map(label) });
-  };
-  push(
-    1,
-    "Photos hidden inside SVG files",
-    "These .svg files wrap a base64 PNG or JPEG. They can't be compressed, cached or resized like real images, and they're often several MB. Export each as WebP (or AVIF) and point the page at that file.",
-    page.filter((i) => (i.embeddedRasterBytes ?? 0) > 20 * KB),
-    (i) => `${short(i.url)}: ${fmt2(i.bytes)} (${fmt2(i.embeddedRasterBytes)} of embedded raster)`
-  );
-  const first = page.find((i) => i.kind === "img");
-  if (first && first.loading === "lazy") findings.push({ severity: 1, title: "The first image is lazy-loaded", detail: 'The first image is usually the hero and the Largest Contentful Paint element. Lazy-loading it delays LCP. Use loading="eager" and fetchpriority="high" on it.', items: [short(first.url)] });
-  push(1, "Autoplay videos without a poster image", "Without a poster, the browser shows nothing until the video downloads, and the video itself becomes the LCP element. Add a lightweight WebP poster.", images.filter((i) => i.kind === "video" && i.autoplay && !i.hasPoster), (i) => i.url ? `${short(i.url)}${i.bytes ? ` (${fmt2(i.bytes)})` : ""}` : "inline <video> with no src");
-  push(2, "Heavy images (over 200 KB)", "Resize to the largest size the layout actually shows (usually under 2000 px wide) and compress. Most photos land under 150 KB as WebP.", page.filter((i) => (i.bytes ?? 0) > 200 * KB && !i.embeddedRasterBytes).sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0)), (i) => `${short(i.url)}: ${fmt2(i.bytes)}`);
-  push(2, "JPG, PNG or GIF that should be WebP or AVIF", "WebP is typically 25\u201335% smaller than JPEG at the same quality, and every current browser supports it.", page.filter((i) => /image\/(jpeg|png|gif)/.test(i.type ?? "") && (i.bytes ?? 0) > 50 * KB), (i) => `${short(i.url)} (${i.type?.replace("image/", "")}, ${fmt2(i.bytes)})`);
-  push(2, "Large images without srcset", "Phones download the full desktop file. Add srcset and sizes so each device gets a right-sized version (WordPress does this automatically for images inserted from the media library).", page.filter((i) => i.kind === "img" && !i.srcset && (i.bytes ?? 0) > 100 * KB && !/svg/.test(i.type ?? "")), (i) => `${short(i.url)}: ${fmt2(i.bytes)}`);
-  push(3, "Missing width and height", "Without dimensions the layout jumps as images load (Cumulative Layout Shift).", page.filter((i) => i.kind === "img" && (!i.width || !i.height)), (i) => short(i.url));
-  push(3, "Below-the-fold images not lazy-loaded", `Images after the first few should use loading="lazy" so they don't compete with the hero.`, page.filter((i) => i.kind === "img" && i.index > 3 && i.loading !== "lazy"), (i) => short(i.url));
-  push(3, "Missing alt text", 'Alt text is how screen readers and AI systems understand an image. Describe what it shows; use alt="" only for decoration.', page.filter((i) => i.kind === "img" && i.alt == null), (i) => short(i.url));
-  push(3, "Broken images", "These image URLs didn't load.", images.filter((i) => i.url && i.status != null && i.status !== 0 && i.status >= 400), (i) => `${short(i.url)} (HTTP ${i.status})`);
-  const og = images.find((i) => i.kind === "og");
-  if (!og) findings.push({ severity: 3, title: "No og:image", detail: "Links shared in Slack, LinkedIn and chat apps show no preview image. Add a 1200x630 og:image.", items: [] });
-  else if ((og.bytes ?? 0) > 600 * KB) findings.push({ severity: 3, title: "Heavy share image", detail: "Some platforms skip og:images over a few hundred KB or time out fetching them.", items: [`${short(og.url)}: ${fmt2(og.bytes)}`] });
-  findings.sort((a, b) => a.severity - b.severity);
-  return { url: res.url || url, status: res.status, images, totalBytes, findings };
-}
-function imageMarkdown(a, maxItems = 8) {
-  const L = [`# Image audit: ${a.url}`, ""];
-  const imgs = a.images.filter((i) => i.kind !== "og" && i.kind !== "video" && i.status !== -1);
-  const biggest = [...imgs].sort((x, y) => (y.bytes ?? 0) - (x.bytes ?? 0))[0];
-  L.push(`- ${imgs.length} images found in the HTML, ${fmt2(a.totalBytes)} in total${biggest?.bytes ? `; the largest is ${short(biggest.url)} at ${fmt2(biggest.bytes)}` : ""}`);
-  const vids = a.images.filter((i) => i.kind === "video");
-  if (vids.length) L.push(`- ${vids.length} video${vids.length === 1 ? "" : "s"}${vids.some((v) => v.autoplay) ? " (autoplay)" : ""}`);
-  L.push("- Counts only what's in the page HTML. Images added later by JavaScript or CSS backgrounds aren't included; use pagespeed_check for the full picture.", "");
-  if (!a.findings.length) {
-    L.push("No image problems found.");
-    return L.join("\n");
-  }
-  const label = ["", "Fix first", "Fix next", "Worth doing"];
-  for (const s of [1, 2, 3]) {
-    const fs = a.findings.filter((x) => x.severity === s);
-    if (!fs.length) continue;
-    L.push(`## ${label[s]}`, "");
-    for (const x of fs) {
-      L.push(`**${x.title}**${x.items.length ? ` (${x.items.length})` : ""}. ${x.detail}`);
-      for (const it of x.items.slice(0, maxItems)) L.push(`- ${it}`);
-      if (x.items.length > maxItems) L.push(`- \u2026and ${x.items.length - maxItems} more`);
-      L.push("");
-    }
-  }
-  return L.join("\n").trimEnd();
-}
-
-// src/featured.ts
-import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir as mkdir3, readFile as readFile3, writeFile as writeFile3 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { join as join3, resolve } from "node:path";
-var esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-var fmt3 = (v) => Number.isInteger(v) ? v.toLocaleString("en-US") : v.toLocaleString("en-US", { maximumFractionDigits: 1 });
-var font = (f) => f.trim().replace(/ /g, "+");
-function cardHtml(c, accent) {
-  const title = c.title ? `<h3>${esc(c.title)}</h3>` : "";
-  const foot = (f) => f ? `<div class="foot"><span class="big" style="color:${accent}">${esc(f.value)}</span><span>${esc(f.text)}</span></div>` : "";
-  if (c.type === "bars") {
-    const max = Math.max(...c.rows.map((r) => r.value), 1);
-    const colors = [accent, "#f98600", "#e8e8e8", "#9ad1ff", "#b9f6ca"];
-    const dense = c.rows.length + (c.footer ? 1 : 0) >= 5;
-    return title + c.rows.slice(0, 5).map((r, i) => `<div class="bar${dense ? " dense" : ""}"><div class="bl"><span><b>${esc(r.label)}</b>${r.note ? ` <i>\xB7 ${esc(r.note)}</i>` : ""}</span><b class="num">${fmt3(r.value)}</b></div><div class="track"><div style="width:${Math.max(r.value / max * 100, 1.6).toFixed(1)}%;background:${colors[i % colors.length]}"></div></div></div>`).join("") + foot(c.footer);
-  }
-  if (c.type === "stats") {
-    return title + `<div class="stats">${c.rows.slice(0, 4).map((r) => `<div><span class="big" style="color:${accent}${r.value.length > 9 ? ";font-size:28px" : ""}">${esc(r.value)}</span><span>${esc(r.label)}</span></div>`).join("")}</div>`;
-  }
-  if (c.type === "before_after") {
-    const W = 492, x0 = 150, x1 = 480, rows = c.rows.slice(0, 7);
-    const X = (v) => x0 + (v - c.min) / Math.max(c.max - c.min, 1) * (x1 - x0);
-    const H = 20 + rows.length * 42 + 20;
-    let svg = `<svg width="${W}" height="${Math.min(H + 24, 290)}" viewBox="0 0 ${W} ${H + 24}" font-family="inherit">`;
-    const step = c.max - c.min <= 10 ? 1 : Math.ceil((c.max - c.min) / 8);
-    for (let v = c.min; v <= c.max; v += step) svg += `<line x1="${X(v)}" y1="0" x2="${X(v)}" y2="${H}" stroke="#262626"/><text x="${X(v)}" y="${H + 20}" fill="#8a8a8a" font-size="13" text-anchor="middle">${v}</text>`;
-    rows.forEach((r, i) => {
-      const y = 20 + i * 42;
-      svg += `<text x="0" y="${y + 5}" fill="#e6e6e6" font-size="15">${esc(r.label)}</text><line x1="${X(r.before)}" y1="${y}" x2="${X(r.after)}" y2="${y}" stroke="${accent}" stroke-width="4"/><circle cx="${X(r.before)}" cy="${y}" r="8" fill="#6b6b6b"/><circle cx="${X(r.after)}" cy="${y}" r="9" fill="${accent}"/>`;
-    });
-    return title + svg + "</svg>" + foot(c.footer);
-  }
-  return title + `<ul class="list">${c.rows.slice(0, 6).map((r) => `<li><span style="background:${accent}"></span>${esc(r)}</li>`).join("")}</ul>`;
-}
-async function featuredHtml(s) {
-  const bg = s.background ?? "#ffc61a", ink = s.ink ?? "#111111", accent = s.accent ?? bg;
-  const hf = s.headingFont ?? "Days One", bf = s.bodyFont ?? "DM Sans";
-  let logo = s.brand ? `<div class="brand">${esc(s.brand)}</div>` : "";
-  if (s.logoSvg) {
-    const svg = await readFile3(resolve(s.logoSvg.replace(/^~(?=\/)/, homedir3())), "utf8");
-    logo = `<div class="logo">${svg.replace(/<\?xml[^>]*>/, "")}</div>`;
-  }
-  const long = s.headline.length > 42;
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
-@import url('https://fonts.googleapis.com/css2?family=${font(hf)}&family=${font(bf)}:wght@400;500;700&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{width:1200px;height:630px;overflow:hidden}
-body{font-family:'${bf}',sans-serif;color:${ink};position:relative;background:radial-gradient(circle at 18% 105%,rgba(255,255,255,.28) 0,transparent 55%),radial-gradient(circle at 95% 0%,rgba(0,0,0,.08) 0,transparent 50%),${bg}}
-.rings{position:absolute;left:-240px;bottom:-330px;width:760px;height:760px;border-radius:50%;box-shadow:0 0 0 38px rgba(255,255,255,.10),0 0 0 76px rgba(0,0,0,.035),0 0 0 114px rgba(255,255,255,.08),0 0 0 152px rgba(0,0,0,.03)}
-.pix{position:absolute;right:0;top:0;width:520px;height:630px;opacity:.55;background-image:linear-gradient(90deg,rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px);background-size:44px 44px}
-.logo{position:absolute;left:64px;top:48px;height:52px;display:flex;align-items:center}.logo svg{height:44px;width:auto;max-width:420px}
-.brand{position:absolute;left:64px;top:58px;font:700 22px '${bf}';letter-spacing:.12em;text-transform:uppercase}
-.eyebrow{position:absolute;right:64px;top:60px;font:700 13px '${bf}';letter-spacing:.14em;background:${ink};color:${bg};padding:8px 14px;border-radius:999px;text-transform:uppercase}
-.left{position:absolute;left:64px;top:150px;width:470px}
-h1{font-family:'${hf}',sans-serif;font-weight:400;font-size:${long ? 40 : 46}px;line-height:1.08}
-.sub{margin-top:18px;font-size:20px;line-height:1.4;font-weight:500;opacity:.88}
-.card{position:absolute;right:56px;top:128px;width:560px;height:410px;background:#111;border-radius:22px;padding:30px 34px;color:#f2f2f2;box-shadow:0 30px 60px rgba(0,0,0,.22);overflow:hidden}
-.card h3{font:700 13px '${bf}';letter-spacing:.14em;color:${accent === "#111111" ? "#fff" : accent};margin-bottom:18px;text-transform:uppercase}
-.bar{margin:0 0 22px}.bl{display:flex;justify-content:space-between;font-size:15px;margin-bottom:8px}.bl i{color:#9a9a9a;font-style:normal}.num{font-family:'${hf}'}
-.track{height:26px;background:#222;border-radius:6px}.track div{height:26px;border-radius:6px}
-.bar.dense{margin:0 0 13px}.bar.dense .bl{margin-bottom:6px}.bar.dense .track,.bar.dense .track div{height:18px}
-.foot{border-top:1px solid #2c2c2c;padding-top:18px;display:flex;align-items:baseline;gap:14px}.foot span:last-child{font-size:15px;line-height:1.35;color:#d8d8d8}
-.big{font:400 40px '${hf}'}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:26px 22px;margin-top:8px}.stats div{display:flex;flex-direction:column;gap:6px}.stats span:last-child{font-size:15px;color:#d8d8d8;line-height:1.35}
-.list{list-style:none;margin-top:6px}.list li{display:flex;gap:12px;align-items:center;font-size:18px;margin:0 0 18px}.list li span{width:10px;height:10px;border-radius:50%;flex:none}
-.src{position:absolute;left:64px;bottom:40px;font-size:14px;font-weight:500;opacity:.8}
-.url{position:absolute;right:64px;bottom:40px;font:700 14px '${bf}'}
-</style></head><body><div class="rings"></div><div class="pix"></div>${logo}${s.eyebrow ? `<div class="eyebrow">${esc(s.eyebrow)}</div>` : ""}
-<div class="left"><h1>${esc(s.headline)}</h1>${s.subhead ? `<p class="sub">${esc(s.subhead)}</p>` : ""}</div>
-<div class="card">${cardHtml(s.card, accent === bg && /^#?f/i.test(bg) ? bg : accent)}</div>
-${s.source ? `<div class="src">${esc(s.source)}</div>` : ""}${s.site ? `<div class="url">${esc(s.site)}</div>` : ""}</body></html>`;
-}
-var CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n4 = 0; n4 < 256; n4++) {
-    let c = n4;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
-    t[n4] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(b) {
-  let c = 4294967295;
-  for (const x of b) c = CRC_TABLE[(c ^ x) & 255] ^ c >>> 8;
-  return (c ^ 4294967295) >>> 0;
-}
-function addPngText(png, entries) {
-  const iend = png.lastIndexOf(Buffer.from("IEND", "latin1")) - 4;
-  if (iend < 8) return png;
-  const chunks = Object.entries(entries).map(([k, v]) => {
-    const data = Buffer.concat([Buffer.from(k, "latin1"), Buffer.from([0]), Buffer.from(v, "latin1")]);
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const type = Buffer.from("tEXt", "latin1");
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(Buffer.concat([type, data])));
-    return Buffer.concat([len, type, data, crc]);
-  });
-  return Buffer.concat([png.subarray(0, iend), ...chunks, png.subarray(iend)]);
-}
-var CREDIT = { Software: "AlchemyAgent (https://alchemyagent.ai)", Comment: "Created with AlchemyAgent, https://alchemyagent.ai" };
-function findChrome() {
-  const c = process.platform === "darwin" ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"] : process.platform === "win32" ? [`${process.env["PROGRAMFILES"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["PROGRAMFILES(X86)"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["LOCALAPPDATA"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["PROGRAMFILES(X86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`] : ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/microsoft-edge"];
-  return c.find((p) => p && existsSync(p)) ?? null;
-}
-async function renderFeatured(spec, outDir, name = "featured", credit = true) {
-  const dir = resolve((outDir ?? join3(homedir3(), "Downloads", "alchemyagent-images")).replace(/^~(?=\/)/, homedir3()));
-  await mkdir3(dir, { recursive: true });
-  const slug2 = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "featured";
-  const html = join3(dir, `${slug2}.html`), png = join3(dir, `${slug2}.png`);
-  await writeFile3(html, await featuredHtml(spec), "utf8");
-  const chrome = findChrome();
-  if (!chrome) return { html, note: "No Chrome, Edge, Chromium or Brave found, so only the HTML was written. Open it in a browser at 1200x630 and screenshot it, or install Chrome and run again." };
-  await new Promise((ok) => execFile(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2", "--window-size=1200,630", "--virtual-time-budget=5000", `--screenshot=${png}`, `file://${html}`], { timeout: 6e4 }, () => ok()));
-  if (!existsSync(png)) return { html, note: `Chrome didn't produce a screenshot. The HTML is at ${html}.` };
-  if (credit) await writeFile3(png, addPngText(await readFile3(png), CREDIT));
-  return { html, png };
-}
-
-// src/connections.ts
-import { existsSync as existsSync2 } from "node:fs";
-function connState(o, tokenFile) {
-  return {
-    gscOAuth: !!(o.gsc?.clientId && o.gsc?.clientSecret),
-    gscSignedIn: existsSync2(tokenFile),
-    gscServiceAccount: !!o.gsc?.serviceAccountFile,
-    bing: !!o.bingKey,
-    cloudflare: !!o.cloudflareToken,
-    brave: !!o.braveKey,
-    psi: !!o.psiKey
-  };
-}
-var SETTINGS = "Claude Desktop: Settings > Extensions > AlchemyAgent > Configure. Claude Code: run /plugin, open AlchemyAgent and edit its settings.";
-function connectionsMarkdown(s) {
-  const gsc2 = s.gscServiceAccount || s.gscOAuth && s.gscSignedIn;
-  const rows = [
-    [
-      "Google Search Console",
-      gsc2,
-      "Your real Google queries, clicks, impressions and positions, and which queries come from AI assistants. The single most useful source: fixes get ranked by what actually earns traffic.",
-      s.gscOAuth && !s.gscSignedIn ? 'Your OAuth client is set. Ask Claude to "connect Search Console" (gsc_connect) and sign in once.' : `Add a Google OAuth client ID and secret (Google Cloud > Credentials > OAuth client ID > Desktop app, with the Search Console API enabled), or a service account JSON file whose email is a user on your property. ${SETTINGS} Then ask Claude to "connect Search Console".`
-    ],
-    [
-      "Bing Webmaster Tools",
-      s.bing,
-      "Bing traffic, top queries and pages, index and crawl errors. Bing's index also feeds Microsoft Copilot and other AI assistants.",
-      `Bing Webmaster Tools > Settings (gear) > API access > API key, then paste it into bing_api_key. ${SETTINGS}`
-    ],
-    [
-      "Cloudflare logs",
-      s.cloudflare,
-      "Which AI crawlers and assistants actually read your pages, fake bots, real crawlers you're blocking, and bot-only errors. Analytics tools never see any of this.",
-      `Cloudflare > My Profile > API Tokens > Create Token > Custom: Zone > Analytics > Read and Zone > Zone > Read (add Account > Account Analytics > Read for Web Analytics). Paste it into cloudflare_api_token. ${SETTINGS} Needs your site proxied through Cloudflare.`
-    ],
-    [
-      "Google Analytics 4",
-      false,
-      "Sessions, conversions and revenue by landing page and channel, including AI-assistant referrals.",
-      "Coming soon. Until then, tell Claude your GA4 numbers (for example, sessions for the last 28 days) and tools like log_file_analysis will compare them with your logs."
-    ],
-    ["Brave Search API", s.brave, "Where you rank in Brave Search, an independent index several AI tools use.", `Free plan at api-dashboard.search.brave.com; paste the key into brave_api_key. ${SETTINGS}`],
-    ["PageSpeed Insights key", s.psi, "Optional: skips the shared daily limit on speed checks.", `Free key from Google Cloud with the PageSpeed Insights API enabled; paste it into psi_api_key. ${SETTINGS}`]
-  ];
-  const on = rows.filter((r) => r[1]).length;
-  const L = [
-    `# Your data connections: ${on} of ${rows.length} connected`,
-    "",
-    "Every public-site check works without these. Connecting your own data is what lets AlchemyAgent rank fixes by real traffic, real queries and real crawler visits instead of best practice alone. Keys and tokens stay on your computer and only go to the service they belong to.",
-    ""
-  ];
-  for (const [name, ok, why, how] of rows) {
-    L.push(`## ${ok ? "\u2713" : "\u25CB"} ${name}${ok ? ": connected" : ""}`, why);
-    if (!ok) L.push("", `**How to connect:** ${how}`);
-    L.push("");
-  }
-  const next = rows.find((r) => !r[1] && r[0] !== "Google Analytics 4");
-  if (next) L.push(`**Start with:** ${next[0]}.`);
-  return L.join("\n").trimEnd();
-}
-
-// src/bing.ts
-var BASE2 = "https://ssl.bing.com/webmaster/api.svc/json/";
-var BING_KEY_HELP = "Bing Webmaster Tools needs your own API key. In Bing Webmaster Tools (https://www.bing.com/webmasters), open Settings (the gear) > API access > API key, generate a key, then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The key stays on your computer and is only sent to Bing.";
-var BingError = class extends Error {
-};
-async function call(f, key, method, params = {}) {
-  const q = new URLSearchParams({ ...params, apikey: key });
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 2e4);
-  let res;
-  try {
-    res = await f(`${BASE2}${method}?${q}`, { headers: { accept: "application/json" }, signal: ctl.signal });
-  } catch {
-    throw new BingError(`Couldn't reach the Bing Webmaster API (${method}). Try again in a minute.`);
-  } finally {
-    clearTimeout(t);
-  }
-  const body = await res.json().catch(() => null);
-  if (!res.ok || !body || body.ErrorCode) {
-    const msg2 = body?.Message ? String(body.Message) : `HTTP ${res.status}`;
-    if (res.status === 401 || /api ?key|unauthori[sz]ed|InvalidApiKey/i.test(msg2)) throw new BingError(`Bing rejected the API key (${msg2}). ${BING_KEY_HELP}`);
-    throw new BingError(`Bing Webmaster API ${method} failed: ${msg2}`);
-  }
-  return body.d;
-}
-function bingDate(v) {
-  const m = /\/Date\((-?\d+)/.exec(String(v ?? ""));
-  return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : "";
-}
-async function listSites2(f, key) {
-  const d = await call(f, key, "GetUserSites") ?? [];
-  return d.map((s) => ({ url: String(s.Url), verified: !!s.IsVerified }));
-}
-function matchSite(sites, input) {
-  const host4 = (u) => {
-    try {
-      return new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, "").toLowerCase();
-    } catch {
-      return "";
-    }
-  };
-  const want = host4(input);
-  return sites.find((s) => s.url.replace(/\/$/, "") === input.replace(/\/$/, "")) ?? sites.find((s) => host4(s.url) === want) ?? null;
-}
-function aggregate(rows) {
-  const by = /* @__PURE__ */ new Map();
-  const dates = [];
-  for (const r of rows ?? []) {
-    const k = String(r.Query ?? "");
-    if (!k) continue;
-    const a = by.get(k) ?? { clicks: 0, impressions: 0, posSum: 0, posW: 0 };
-    const imp = Number(r.Impressions) || 0;
-    a.clicks += Number(r.Clicks) || 0;
-    a.impressions += imp;
-    const pos = Number(r.AvgImpressionPosition);
-    if (pos > 0 && imp > 0) {
-      a.posSum += pos * imp;
-      a.posW += imp;
-    }
-    by.set(k, a);
-    const d = bingDate(r.Date);
-    if (d) dates.push(d);
-  }
-  dates.sort();
-  return {
-    rows: [...by].map(([key, a]) => ({ key, clicks: a.clicks, impressions: a.impressions, position: a.posW ? a.posSum / a.posW : null })).sort((x, y) => y.clicks - x.clicks || y.impressions - x.impressions),
-    from: dates[0] ?? "",
-    to: dates[dates.length - 1] ?? ""
-  };
-}
-async function bingReport(f, key, siteUrl, sections) {
-  const p = { siteUrl };
-  const want = new Set(sections);
-  const [traffic, queries, pages, crawl, quota] = await Promise.all([
-    want.has("traffic") ? call(f, key, "GetRankAndTrafficStats", p) : null,
-    want.has("queries") ? call(f, key, "GetQueryStats", p) : null,
-    want.has("pages") ? call(f, key, "GetPageStats", p) : null,
-    want.has("crawl") ? call(f, key, "GetCrawlStats", p) : null,
-    want.has("crawl") ? call(f, key, "GetUrlSubmissionQuota", p).catch(() => null) : null
-  ]);
-  const out = { site: siteUrl };
-  if (traffic) {
-    const rows = traffic.map((r) => ({ date: bingDate(r.Date), clicks: Number(r.Clicks) || 0, impressions: Number(r.Impressions) || 0 })).filter((r) => r.date).sort((a, b) => a.date.localeCompare(b.date));
-    const last = rows.length ? Date.parse(rows[rows.length - 1].date) : 0;
-    const sum = (lo, hi) => rows.filter((r) => {
-      const age = (last - Date.parse(r.date)) / 864e5;
-      return age >= lo && age < hi;
-    }).reduce((a, r) => ({ clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions }), { clicks: 0, impressions: 0 });
-    out.traffic = { last28: sum(0, 28), prev28: sum(28, 56), from: rows[0]?.date ?? "", to: rows[rows.length - 1]?.date ?? "" };
-  }
-  if (queries) out.queries = aggregate(queries);
-  if (pages) out.pages = aggregate(pages);
-  if (crawl) {
-    const rows = [...crawl].sort((a, b) => bingDate(a.Date).localeCompare(bingDate(b.Date)));
-    const r = rows[rows.length - 1];
-    out.crawl = r ? {
-      date: bingDate(r.Date),
-      inIndex: Number(r.InIndex) || 0,
-      crawled: Number(r.CrawledPages) || 0,
-      errors: Number(r.CrawlErrors) || 0,
-      c4xx: Number(r.Code4xx) || 0,
-      c5xx: Number(r.Code5xx) || 0,
-      robotsBlocked: Number(r.BlockedByRobotsTxt) || 0,
-      inLinks: Number(r.InLinks) || 0
-    } : null;
-  }
-  if (quota) out.quota = { daily: Number(quota.DailyQuota) || 0, monthly: Number(quota.MonthlyQuota) || 0 };
-  return out;
-}
-var n3 = (v) => v.toLocaleString("en-US");
-var pct2 = (a, b) => b ? `${a >= b ? "+" : ""}${Math.round((a - b) / b * 100)}%` : "n/a";
-function sitesMarkdown(sites) {
-  if (!sites.length) return "No sites in this Bing Webmaster Tools account yet. Add and verify one at https://www.bing.com/webmasters (you can import sites from Google Search Console).";
-  return ["## Sites in your Bing Webmaster Tools account", "", ...sites.map((s) => `- ${s.url}${s.verified ? "" : " (not verified)"}`), "", 'Ask for a report on one of these, e.g. "Bing queries for ' + sites[0].url + '".'].join("\n");
-}
-function bingMarkdown(r, limit = 15) {
-  const L = [`## Bing Webmaster Tools: ${r.site}`, ""];
-  if (r.traffic) {
-    const { last28: a, prev28: b } = r.traffic;
-    L.push(
-      "### Bing search traffic",
-      "| | Last 28 days | Previous 28 days | Change |",
-      "|---|---|---|---|",
-      `| Clicks | ${n3(a.clicks)} | ${n3(b.clicks)} | ${pct2(a.clicks, b.clicks)} |`,
-      `| Impressions | ${n3(a.impressions)} | ${n3(b.impressions)} | ${pct2(a.impressions, b.impressions)} |`,
-      `| CTR | ${a.impressions ? (a.clicks / a.impressions * 100).toFixed(1) + "%" : "n/a"} | ${b.impressions ? (b.clicks / b.impressions * 100).toFixed(1) + "%" : "n/a"} | |`,
-      "",
-      `Data through ${r.traffic.to || "n/a"}. Bing's index also feeds Microsoft Copilot and several other search and AI tools, so it matters beyond bing.com.`,
-      ""
-    );
-  }
-  const table = (title, agg, label) => {
-    L.push(`### ${title}`, agg.from ? `${agg.from} to ${agg.to}, ${n3(agg.rows.length)} ${label.toLowerCase()}s` : "", "");
-    if (!agg.rows.length) {
-      L.push("No data yet. New sites can take a few days to show data.", "");
-      return;
-    }
-    L.push(`| ${label} | Clicks | Impressions | CTR | Avg position |`, "|---|---|---|---|---|");
-    for (const q of agg.rows.slice(0, limit)) {
-      L.push(`| ${q.key.replace(/\|/g, "\\|")} | ${n3(q.clicks)} | ${n3(q.impressions)} | ${q.impressions ? (q.clicks / q.impressions * 100).toFixed(1) + "%" : ""} | ${q.position ? q.position.toFixed(1) : ""} |`);
-    }
-    L.push("");
-  };
-  if (r.queries) table("Top queries", r.queries, "Query");
-  if (r.pages) table("Top pages", r.pages, "Page");
-  if (r.crawl !== void 0) {
-    L.push("### Crawl and index");
-    if (!r.crawl) L.push("No crawl data yet.");
-    else {
-      const c = r.crawl;
-      L.push(`Latest day (${c.date}): **${n3(c.inIndex)} pages in Bing's index**, ${n3(c.crawled)} crawled, ${n3(c.errors)} crawl errors (${n3(c.c4xx)} 4xx, ${n3(c.c5xx)} 5xx), ${n3(c.robotsBlocked)} blocked by robots.txt, ${n3(c.inLinks)} inbound links.`);
-      if (c.c5xx > 0) L.push("", "5xx errors mean Bingbot is hitting server errors or a firewall. Check that your CDN/WAF isn't challenging Bingbot.");
-    }
-    if (r.quota) L.push("", `URL submission quota: ${n3(r.quota.daily)} today, ${n3(r.quota.monthly)} this month. (IndexNow pings don't use this quota.)`);
-    L.push("");
-  }
-  return L.join("\n").trimEnd();
 }
 
 // src/server.ts
@@ -3179,10 +2065,10 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.7";
+var VERSION = "0.3.8";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
-function createServer2(opts = {}) {
+function createServer(opts = {}) {
   const apiBase = (opts.apiBase ?? DEFAULT_API_BASE).replace(/\/$/, "");
   const f = opts.fetchFn ?? fetch;
   const psi = { apiBase, apiKey: opts.psiKey, fetchFn: f };
@@ -3307,8 +2193,8 @@ function createServer2(opts = {}) {
         let text = csv_text;
         if (!text && csv_path && opts.remote) throw new Error("This hosted version can't read files. Paste the contents of Queries.csv as csv_text.");
         if (!text && csv_path) {
-          const { readFile: readFile4 } = await import("node:fs/promises");
-          text = await readFile4(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
+          const { readFile: readFile2 } = await import("node:fs/promises");
+          text = await readFile2(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
         }
         if (!text) throw new Error("Pass csv_path (the Queries.csv from a Search Console export) or csv_text.");
         const rows = rowsFromCsv(text);
@@ -3373,10 +2259,10 @@ function createServer2(opts = {}) {
       annotations: ro
     },
     async ({ url }) => run(async () => {
-      const host4 = new URL(normalizeUrl(url)).hostname;
-      const wd = await api(`/api/wikidata?${new URLSearchParams({ domain: host4 })}`).catch(() => null);
+      const host3 = new URL(normalizeUrl(url)).hostname;
+      const wd = await api(`/api/wikidata?${new URLSearchParams({ domain: host3 })}`).catch(() => null);
       const article = wd?.matchedBy === "official website" ? wd.entities?.[0]?.wikipedia : void 0;
-      return wikipediaMarkdown(await wikipediaCheck(host4, article, f));
+      return wikipediaMarkdown(await wikipediaCheck(host3, article, f));
     })
   );
   register(
@@ -3404,9 +2290,9 @@ function createServer2(opts = {}) {
       async ({ url, include }) => {
         try {
           const target = normalizeUrl(url);
-          const host4 = new URL(target).hostname.replace(/^www\./, "");
+          const host3 = new URL(target).hostname.replace(/^www\./, "");
           const [robots, page] = await Promise.all([
-            include === "page" ? Promise.resolve(null) : robotsHistory(host4, f),
+            include === "page" ? Promise.resolve(null) : robotsHistory(host3, f),
             include === "robots" ? Promise.resolve(null) : pageHistory(target, f)
           ]);
           return { content: [{ type: "text", text: waybackMarkdown(robots, page) }] };
@@ -3482,8 +2368,8 @@ function createServer2(opts = {}) {
       },
       async ({ url, queries, country }) => run(async () => {
         if (!opts.braveKey) throw new Error(BRAVE_KEY_HELP);
-        const host4 = new URL(normalizeUrl(url)).hostname;
-        return braveMarkdown(host4, await braveRank(f, opts.braveKey, host4, queries, country.toUpperCase()), country.toUpperCase());
+        const host3 = new URL(normalizeUrl(url)).hostname;
+        return braveMarkdown(host3, await braveRank(f, opts.braveKey, host3, queries, country.toUpperCase()), country.toUpperCase());
       })
     );
     register(
@@ -3625,6 +2511,32 @@ ${md}`;
       })
     );
     register(
+      "ga4_report",
+      {
+        title: "Google Analytics 4 report",
+        description: "Read the user's own Google Analytics 4 data with their Google sign-in: sessions, engaged sessions, key events and revenue for the last N days vs the N days before, by channel, landing page, source, or AI assistant referrals (ChatGPT, Perplexity, Claude, Gemini, Copilot and more). Call without property to list the GA4 properties the account can read. Uses the Google Analytics Data API (https://developers.google.com/analytics/devguides/reporting/data/v1).",
+        inputSchema: {
+          property: external_exports.string().optional().describe("GA4 property name or ID (or the site's domain). Omit to list properties."),
+          by: external_exports.enum(["channel", "landing_page", "source", "ai_assistants"]).default("channel").describe("How to group sessions"),
+          days: external_exports.number().int().min(7).max(365).default(28).describe("Days to report (compared with the same number of days before)"),
+          limit: external_exports.number().int().min(5).max(100).default(20).describe("Rows to show")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async ({ property: property2, by, days, limit }) => {
+        try {
+          const creds = opts.gsc ?? {};
+          const props = await listProperties(creds, f);
+          if (!property2) return { content: [{ type: "text", text: propertiesMarkdown(props) }] };
+          const p = matchGa4(props, property2);
+          if (!p) throw new Error(`${property2} isn't a GA4 property this account can read. ${props.length ? "Properties: " + props.map((x) => `${x.name} (${x.id})`).join(", ") : ""}`);
+          return { content: [{ type: "text", text: ga4Markdown(await ga4Report(creds, p, by, days, f), limit) }] };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
+    );
+    register(
       "data_connections",
       {
         title: "Connect your data (setup status)",
@@ -3632,7 +2544,7 @@ ${md}`;
         inputSchema: {},
         annotations: { readOnlyHint: true, openWorldHint: false }
       },
-      async () => ({ content: [{ type: "text", text: connectionsMarkdown(connState(opts, TOKEN_FILE)) }] })
+      async () => ({ content: [{ type: "text", text: connectionsMarkdown({ ...connState(opts, TOKEN_FILE), ga4: await hasScope(opts.gsc ?? {}, GA4_SCOPE).catch(() => false) }) }] })
     );
     register(
       "featured_image",
@@ -3779,7 +2691,7 @@ var env = (k) => {
   const v = (process.env[k] || "").trim();
   return v && !v.startsWith("${") ? v : void 0;
 };
-var server = createServer2({
+var server = createServer({
   psiKey: env("ALCHEMYAGENT_PSI_KEY"),
   bingKey: env("ALCHEMYAGENT_BING_KEY"),
   braveKey: env("ALCHEMYAGENT_BRAVE_KEY"),
