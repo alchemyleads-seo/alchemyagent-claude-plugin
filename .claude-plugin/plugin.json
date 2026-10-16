@@ -1,6 +1,6 @@
 {
   "name": "alchemyagent",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "AI search toolkit for Claude Code: AI crawler access, what AI sees on a page, llms.txt and agent readiness, brand presence (Wikidata, Wikipedia, news, research, communities), speed, schema, Bing, Brave and your own Search Console. Plus skills for audits, llms.txt and robots.txt AI policy.",
   "author": {
     "name": "AlchemyLeads",
@@ -25,6 +25,14 @@
   "privacyPolicyUrl": "https://alchemyleads.com/privacy-policy/#alchemyagent-free-tools",
   "termsOfServiceUrl": "https://alchemyleads.com/terms-of-use/",
   "userConfig": {
+    "alchemyagent_license_key": {
+      "type": "string",
+      "title": "AlchemyAgent Pro license key (optional)",
+      "description": "Unlocks page quality rating. Get Pro at alchemyagent.ai. Only sent to api.alchemyagent.ai.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
     "google_client_id": {
       "type": "string",
       "title": "Google OAuth client ID (Search Console)",

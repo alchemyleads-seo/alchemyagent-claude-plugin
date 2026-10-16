@@ -157,6 +157,36 @@ var StdioServerTransport = class {
   }
 };
 
+// src/quality.ts
+var PRO_HELP = "Page quality rating is part of AlchemyAgent Pro: each page is rated 1 to 9 against our private rubric (built from the concepts in Google's public Search Quality Rater Guidelines), with quoted evidence and a specific fix. Add your Pro license key in the AlchemyAgent settings (Claude Desktop: Settings > Extensions > AlchemyAgent > Configure; Claude Code: /plugin, then AlchemyAgent's settings). Get Pro: https://alchemyagent.ai/#pro";
+async function rateQuality(f, apiBase, licenseKey, url, context) {
+  const r = await f(`${apiBase}/api/quality`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${licenseKey}`, "content-type": "application/json", "user-agent": "AlchemyAgent-MCP" },
+    body: JSON.stringify({ url, context })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || `Page quality service error ${r.status}`);
+  return j;
+}
+function qualityMarkdown(rs, failed = []) {
+  const L = [`# Page quality: ${rs.length} page${rs.length === 1 ? "" : "s"} rated`, ""];
+  if (rs.length > 1) {
+    L.push("| Page | Rating | Purpose | Biggest issue |", "|---|---|---|---|");
+    for (const r of [...rs].sort((a, b) => a.rating - b.rating)) L.push(`| ${r.url} | ${r.rating}/9 ${r.band} | ${r.purpose} | ${(r.issues[0]?.issue ?? "none").replace(/\|/g, "/")} |`);
+    L.push("");
+  }
+  for (const r of rs) {
+    L.push(`## ${r.title || r.url}`, `${r.url}`, "", `**${r.rating}/9 (${r.band})** \xB7 purpose: ${r.purpose} \xB7 expertise shown: ${r.expertise}${r.ymyl ? " \xB7 YMYL (held to a higher bar)" : ""} \xB7 ${r.words.toLocaleString("en-US")} words`, "", r.summary, "");
+    if (r.strengths.length) L.push("**Working well**", ...r.strengths.map((s) => `- ${s}`), "");
+    if (r.issues.length) L.push("**Fix first**", ...r.issues.map((i) => `- ${i.issue} \u2192 ${i.fix}`), "");
+  }
+  for (const x of failed) L.push(`- Couldn't rate ${x.url}: ${x.error}`);
+  const last = rs[rs.length - 1];
+  if (last) L.push("", `Ratings are a model's judgment against AlchemyLeads' rubric; Google's own systems aren't public. Use them to triage, then a person decides. Used today: ${last.used_today} of ${last.daily_limit}.`);
+  return L.join("\n").trimEnd();
+}
+
 // src/pagespeed.ts
 var GOOGLE_PSI = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 var FIELD_METRICS = {
@@ -2065,7 +2095,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.8";
+var VERSION = "0.3.9";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer(opts = {}) {
@@ -2655,6 +2685,30 @@ ${md}`;
       }
     );
     register(
+      "page_quality",
+      {
+        title: "Page quality rating (Pro)",
+        description: "AlchemyAgent Pro: rate up to 10 pages 1-9 for quality the way a trained search quality rater would (purpose, main content effort and originality, expertise, trust, YMYL), with quoted evidence, what works, and a specific fix for each issue. The rubric runs on AlchemyAgent's servers and needs the user's Pro license key. Use it to find thin, generic or outdated pages worth rewriting.",
+        inputSchema: {
+          urls: external_exports.array(external_exports.string()).min(1).max(10).describe("Page URLs to rate, e.g. https://example.com/services/"),
+          context: external_exports.string().max(1500).optional().describe("Optional: one or two sentences about the business (what it sells, to whom, who writes the content). Improves trust and expertise judgments.")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async ({ urls, context }) => {
+        try {
+          if (!opts.licenseKey) throw new Error(PRO_HELP);
+          const ok = [], failed = [];
+          const results = await Promise.allSettled(urls.map((u) => rateQuality(f, apiBase, opts.licenseKey, normalizeUrl(u), context)));
+          results.forEach((r, i) => r.status === "fulfilled" ? ok.push(r.value) : failed.push({ url: urls[i], error: r.reason instanceof Error ? r.reason.message : String(r.reason) }));
+          if (!ok.length) throw new Error(failed.map((x) => `${x.url}: ${x.error}`).join("\n"));
+          return { content: [{ type: "text", text: qualityMarkdown(ok, failed) }] };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
+    );
+    register(
       "bing_webmaster",
       {
         title: "Bing Webmaster Tools report",
@@ -2698,6 +2752,7 @@ var server = createServer({
   cloudflareToken: env("ALCHEMYAGENT_CLOUDFLARE_TOKEN"),
   oprKey: env("ALCHEMYAGENT_OPR_KEY"),
   openalexKey: env("ALCHEMYAGENT_OPENALEX_KEY"),
+  licenseKey: env("ALCHEMYAGENT_LICENSE_KEY"),
   gsc: { clientId: env("ALCHEMYAGENT_GOOGLE_CLIENT_ID"), clientSecret: env("ALCHEMYAGENT_GOOGLE_CLIENT_SECRET"), serviceAccountFile: env("ALCHEMYAGENT_GOOGLE_SA_FILE") },
   apiBase: env("ALCHEMYAGENT_API_BASE")
 });
