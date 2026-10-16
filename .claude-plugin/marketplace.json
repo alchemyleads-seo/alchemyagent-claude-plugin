@@ -1,0 +1,14 @@
+{
+  "name": "alchemyagent",
+  "owner": { "name": "AlchemyLeads", "email": "support@alchemyagent.ai" },
+  "metadata": { "description": "AlchemyAgent: AI search tools and skills for Claude." },
+  "plugins": [
+    {
+      "name": "alchemyagent",
+      "source": "./",
+      "description": "AI search toolkit: 24 read-only tools, 7 workflows and 3 skills for AI search visibility.",
+      "version": "0.3.2",
+      "category": "marketing"
+    }
+  ]
+}

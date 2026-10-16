@@ -1,0 +1,9 @@
+{
+  "name": "alchemyagent",
+  "version": "0.3.2",
+  "description": "AI search toolkit for Claude Code: AI crawler access, what AI sees on a page, llms.txt and agent readiness, brand presence (Wikidata, Wikipedia, news, research, communities), speed, schema, Bing, Brave and your own Search Console. Plus skills for audits, llms.txt and robots.txt AI policy.",
+  "author": { "name": "AlchemyLeads", "email": "support@alchemyagent.ai", "url": "https://alchemyleads.com" },
+  "homepage": "https://alchemyagent.ai",
+  "license": "UNLICENSED",
+  "keywords": ["seo", "ai search", "geo", "llms.txt", "robots.txt", "search console", "mcp"]
+}
