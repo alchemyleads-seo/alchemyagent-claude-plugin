@@ -1,6 +1,6 @@
 {
   "name": "alchemyagent",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "AI search toolkit for Claude Code: AI crawler access, what AI sees on a page, llms.txt and agent readiness, brand presence (Wikidata, Wikipedia, news, research, communities), speed, schema, Bing, Brave and your own Search Console. Plus skills for audits, llms.txt and robots.txt AI policy.",
   "author": {
     "name": "AlchemyLeads",
@@ -52,6 +52,14 @@
       "type": "string",
       "title": "Bing Webmaster Tools API key",
       "description": "Optional. Bing Webmaster Tools > Settings > API access. Only sent to Bing.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "cloudflare_api_token": {
+      "type": "string",
+      "title": "Cloudflare API token",
+      "description": "Optional. Enables log file analysis. Custom token with Zone Analytics Read and Zone Read. Only sent to Cloudflare.",
       "sensitive": true,
       "required": false,
       "default": ""

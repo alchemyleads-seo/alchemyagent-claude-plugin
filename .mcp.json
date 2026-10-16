@@ -8,6 +8,7 @@
       "env": {
         "ALCHEMYAGENT_PSI_KEY": "${user_config.psi_api_key}",
         "ALCHEMYAGENT_BING_KEY": "${user_config.bing_api_key}",
+        "ALCHEMYAGENT_CLOUDFLARE_TOKEN": "${user_config.cloudflare_api_token}",
         "ALCHEMYAGENT_BRAVE_KEY": "${user_config.brave_api_key}",
         "ALCHEMYAGENT_OPR_KEY": "${user_config.opr_api_key}",
         "ALCHEMYAGENT_OPENALEX_KEY": "${user_config.openalex_api_key}",

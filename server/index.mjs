@@ -546,7 +546,7 @@ var LOCAL_SUBTYPES = /^(?:\w+Store|Restaurant|Dentist|Physician|LegalService|Att
 var URL_KEYS = /* @__PURE__ */ new Set(["url", "logo", "image", "sameAs", "thumbnailUrl", "contentUrl", "embedUrl", "item", "@id"]);
 var DATE_KEYS = /* @__PURE__ */ new Set(["datePublished", "dateModified", "startDate", "endDate", "uploadDate", "datePosted", "validThrough", "priceValidUntil"]);
 var ISO = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
-var types = (n3) => (Array.isArray(n3["@type"]) ? n3["@type"] : n3["@type"] ? [n3["@type"]] : []).map(String);
+var types = (n4) => (Array.isArray(n4["@type"]) ? n4["@type"] : n4["@type"] ? [n4["@type"]] : []).map(String);
 var ruleFor = (t) => {
   const k = RULES[t] ? t : ALIASES[t] ?? (LOCAL_SUBTYPES.test(t) ? "LocalBusiness" : "");
   return k && RULES[k] ? [k, RULES[k]] : null;
@@ -577,20 +577,20 @@ function checkJsonLd(blocks) {
       const ctx = JSON.stringify(r?.["@context"] ?? "");
       if (!/schema\.org/i.test(ctx)) issues.push({ level: "warning", where: `block ${bi + 1}`, message: "Missing or non-schema.org @context." });
     }
-    walk(data, (n3, path) => nodes.push({ n: n3, path: `block ${bi + 1}${path ? " \u203A " + path : ""}`, block: bi }));
+    walk(data, (n4, path) => nodes.push({ n: n4, path: `block ${bi + 1}${path ? " \u203A " + path : ""}`, block: bi }));
   });
   const ids = /* @__PURE__ */ new Map();
-  for (const { n: n3, block } of nodes) if (typeof n3["@id"] === "string" && types(n3).length) {
-    const arr = ids.get(n3["@id"]) ?? [];
-    arr.push({ types: types(n3), block });
-    ids.set(n3["@id"], arr);
+  for (const { n: n4, block } of nodes) if (typeof n4["@id"] === "string" && types(n4).length) {
+    const arr = ids.get(n4["@id"]) ?? [];
+    arr.push({ types: types(n4), block });
+    ids.set(n4["@id"], arr);
   }
   const typeCount = {};
-  for (const { n: n3, path } of nodes) {
-    const ts = types(n3);
-    const isRef = !ts.length && typeof n3["@id"] === "string" && Object.keys(n3).length === 1;
+  for (const { n: n4, path } of nodes) {
+    const ts = types(n4);
+    const isRef = !ts.length && typeof n4["@id"] === "string" && Object.keys(n4).length === 1;
     if (isRef) {
-      if (!ids.has(n3["@id"])) issues.push({ level: "warning", where: path, message: `References @id "${n3["@id"]}" but no node on the page has that @id.` });
+      if (!ids.has(n4["@id"])) issues.push({ level: "warning", where: path, message: `References @id "${n4["@id"]}" but no node on the page has that @id.` });
       continue;
     }
     for (const t of ts) {
@@ -600,19 +600,19 @@ function checkJsonLd(blocks) {
       const [rk, rule] = r;
       for (const req of rule.required) {
         const opts = Array.isArray(req) ? req : [req];
-        if (!opts.some((k) => present(n3[k]))) issues.push({ level: "error", where: `${path} (${t})`, message: `Missing required ${opts.length > 1 ? "one of " + opts.join(" / ") : opts[0]}.` });
+        if (!opts.some((k) => present(n4[k]))) issues.push({ level: "error", where: `${path} (${t})`, message: `Missing required ${opts.length > 1 ? "one of " + opts.join(" / ") : opts[0]}.` });
       }
-      const missRec = (rule.recommended ?? []).filter((k) => !present(n3[k]));
+      const missRec = (rule.recommended ?? []).filter((k) => !present(n4[k]));
       if (missRec.length && ts.length && !path.includes("itemListElement")) issues.push({ level: "info", where: `${path} (${t})`, message: `Recommended but missing: ${missRec.join(", ")}.` });
       if (rule.note) issues.push({ level: "info", where: `${path} (${t})`, message: rule.note });
-      if ((rk === "LocalBusiness" || rk === "Organization") && present(n3.aggregateRating))
+      if ((rk === "LocalBusiness" || rk === "Organization") && present(n4.aggregateRating))
         issues.push({ level: "warning", where: `${path} (${t})`, message: "aggregateRating on your own business is a self-serving review; Google doesn't show stars for it." });
       if (rk === "AggregateRating") {
-        const v = parseFloat(n3.ratingValue), best = parseFloat(n3.bestRating ?? 5), worst = parseFloat(n3.worstRating ?? 1);
+        const v = parseFloat(n4.ratingValue), best = parseFloat(n4.bestRating ?? 5), worst = parseFloat(n4.worstRating ?? 1);
         if (Number.isFinite(v) && (v > best || v < worst)) issues.push({ level: "error", where: path, message: `ratingValue ${v} is outside ${worst}\u2013${best}.` });
       }
     }
-    for (const [k, v] of Object.entries(n3)) {
+    for (const [k, v] of Object.entries(n4)) {
       const vals = Array.isArray(v) ? v : [v];
       for (const x of vals) {
         if (URL_KEYS.has(k) && typeof x === "string" && x && !/^(https?:)?\/\//i.test(x) && !(k === "@id" && x.startsWith("#")) && !x.startsWith("data:"))
@@ -624,8 +624,8 @@ function checkJsonLd(blocks) {
     }
   }
   for (const t of ["Organization", "LocalBusiness", "WebSite", "Product", "Article", "BlogPosting", "FAQPage", "BreadcrumbList"]) {
-    const withType = nodes.filter(({ n: n3 }) => types(n3).includes(t) && Object.keys(n3).length > 2);
-    const distinct = new Set(withType.map(({ n: n3 }) => n3["@id"] ?? JSON.stringify(n3).slice(0, 200)));
+    const withType = nodes.filter(({ n: n4 }) => types(n4).includes(t) && Object.keys(n4).length > 2);
+    const distinct = new Set(withType.map(({ n: n4 }) => n4["@id"] ?? JSON.stringify(n4).slice(0, 200)));
     if (distinct.size > 1 && new Set(withType.map((w) => w.block)).size > 1)
       issues.push({ level: "warning", where: t, message: `${distinct.size} separate ${t} entities in ${new Set(withType.map((w) => w.block)).size} different blocks. Usually two plugins or snippets emitting schema; merge them under one @id.` });
   }
@@ -648,7 +648,7 @@ function schemaMarkdown(r) {
   ];
   if (!r.blocks && !r.microdata) out.push("", "No structured data found. At minimum, add Organization (or LocalBusiness) and WebSite on the homepage, and the matching type (Product, Article, Service) on each template.");
   const tc = Object.entries(r.typeCount).sort((a, b) => b[1] - a[1]);
-  if (tc.length) out.push("", "Types: " + tc.map(([t, n3]) => n3 > 1 ? `${t} \xD7${n3}` : t).join(", "));
+  if (tc.length) out.push("", "Types: " + tc.map(([t, n4]) => n4 > 1 ? `${t} \xD7${n4}` : t).join(", "));
   const list = (title, xs, max) => {
     if (!xs.length) return;
     out.push("", `### ${title} (${xs.length})`);
@@ -756,8 +756,8 @@ function parseCsv(text) {
   return rows;
 }
 var num = (v) => {
-  const n3 = parseFloat(String(v ?? "").replace(/[,%]/g, "").trim());
-  return Number.isFinite(n3) ? n3 : 0;
+  const n4 = parseFloat(String(v ?? "").replace(/[,%]/g, "").trim());
+  return Number.isFinite(n4) ? n4 : 0;
 };
 function rowsFromCsv(text) {
   const [head, ...data] = parseCsv(text);
@@ -918,7 +918,7 @@ function waybackMarkdown(robots, page) {
     if (!page.captures) out.push("No archived captures of this URL.");
     else {
       out.push(`${page.captures} days captured, from ${page.first} to ${page.last}. The content changed about ${page.changes} times between captures.`);
-      out.push("Captures by year: " + Object.entries(page.byYear).map(([y, n3]) => `${y}: ${n3}`).join(", "));
+      out.push("Captures by year: " + Object.entries(page.byYear).map(([y, n4]) => `${y}: ${n4}`).join(", "));
     }
   }
   out.push("", "Data: Internet Archive Wayback Machine.");
@@ -980,8 +980,8 @@ async function commonCrawlCheck(domain, f = fetch, crawls = 3) {
 function commonCrawlMarkdown(r, ccbotBlocked) {
   const out = [`## Common Crawl presence: ${r.domain}`, "", "| Crawl | In the crawl? | Pages seen (sample cap 50) |", "|---|---|---|"];
   for (const c of r.crawls) {
-    const n3 = c.found === null ? "index busy, couldn't check" : c.found ? c.capped ? "50+" : String(c.count) : "0";
-    out.push(`| ${c.name.replace(/^.*?(\d{4})/, "$1")} (${c.crawl}) | ${c.found === null ? "unknown" : c.found ? "yes" : "no"} | ${n3} |`);
+    const n4 = c.found === null ? "index busy, couldn't check" : c.found ? c.capped ? "50+" : String(c.count) : "0";
+    out.push(`| ${c.name.replace(/^.*?(\d{4})/, "$1")} (${c.crawl}) | ${c.found === null ? "unknown" : c.found ? "yes" : "no"} | ${n4} |`);
   }
   const anyYes = r.crawls.some((c) => c.found);
   const latest = r.crawls[0];
@@ -998,7 +998,7 @@ function commonCrawlMarkdown(r, ccbotBlocked) {
 
 // src/render.ts
 var BROWSER_UA2 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n3) => String.fromCodePoint(Number(n3))).replace(/&[a-z]+;/gi, " ");
+var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n4) => String.fromCodePoint(Number(n4))).replace(/&[a-z]+;/gi, " ");
 var textOf = (html) => decode(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 var words = (s) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 function frameworks(html) {
@@ -1020,7 +1020,7 @@ function frameworks(html) {
     ["Framer", /framerusercontent|data-framer-/],
     ["HubSpot CMS", /hs-scripts|hubspotusercontent/]
   ];
-  return f.filter(([, re]) => re.test(html)).map(([n3]) => n3);
+  return f.filter(([, re]) => re.test(html)).map(([n4]) => n4);
 }
 async function renderCheck(url, f = fetch) {
   const r = await get(f, url, BROWSER_UA2, 2e4);
@@ -1311,12 +1311,12 @@ function wikipediaMarkdown(r, limit = 25) {
       ""
     );
   } else if (r.pageviews === null) L.push("Couldn't load page views for the brand article.", "");
-  const n3 = r.articles.length;
-  L.push(`### Articles linking to ${r.domain}`, n3 ? `${n3} article${n3 === 1 ? "" : "s"} across ${new Set(r.articles.map((a) => a.lang)).size} language${new Set(r.articles.map((a) => a.lang)).size === 1 ? "" : "s"} (checked ${r.checked.join(", ")}).` : `None found in ${r.checked.join(", ")} Wikipedia.`, "");
-  if (n3) {
+  const n4 = r.articles.length;
+  L.push(`### Articles linking to ${r.domain}`, n4 ? `${n4} article${n4 === 1 ? "" : "s"} across ${new Set(r.articles.map((a) => a.lang)).size} language${new Set(r.articles.map((a) => a.lang)).size === 1 ? "" : "s"} (checked ${r.checked.join(", ")}).` : `None found in ${r.checked.join(", ")} Wikipedia.`, "");
+  if (n4) {
     L.push("| Wiki | Article | Links to |", "|---|---|---|");
     for (const a of r.articles.slice(0, limit)) L.push(`| ${a.lang} | [${a.title.replace(/\|/g, "\\|")}](${a.url}) | ${a.links.slice(0, 2).map((u) => u.replace(/^https?:\/\//, "")).join(", ")}${a.links.length > 2 ? ` +${a.links.length - 2}` : ""} |`);
-    if (n3 > limit) L.push("", `\u2026and ${n3 - limit} more.`);
+    if (n4 > limit) L.push("", `\u2026and ${n4 - limit} more.`);
     L.push("");
   }
   if (r.failed.length) L.push(`Couldn't check: ${r.failed.join(", ")}.`, "");
@@ -2219,6 +2219,195 @@ function alertsMarkdown(r, limit = 25) {
   return L.join("\n");
 }
 
+// src/cflogs.ts
+var API2 = "https://api.cloudflare.com/client/v4";
+var CF_TOKEN_HELP = "Log file analysis needs your own Cloudflare API token, and the site's DNS must be proxied through Cloudflare. In Cloudflare: My Profile > API Tokens > Create Token > Custom token, with permissions Zone > Analytics > Read and Zone > Zone > Read (add Account > Account Analytics > Read to include Cloudflare Web Analytics visits). Then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The token stays on your computer and is only sent to Cloudflare.";
+var CfError = class extends Error {
+};
+async function cf(f, token, path, init = {}) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 3e4);
+  let res;
+  try {
+    res = await f(`${API2}${path}`, { ...init, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json" }, signal: ctl.signal });
+  } catch {
+    throw new CfError("Couldn't reach the Cloudflare API. Try again in a minute.");
+  } finally {
+    clearTimeout(t);
+  }
+  const body = await res.json().catch(() => null);
+  if (res.status === 401 || res.status === 403) throw new CfError(`Cloudflare rejected the API token (HTTP ${res.status}). ${CF_TOKEN_HELP}`);
+  if (!res.ok || !body) throw new CfError(`Cloudflare API returned HTTP ${res.status}.`);
+  return body;
+}
+async function gql(f, token, query) {
+  const body = await cf(f, token, "/graphql", { method: "POST", body: JSON.stringify({ query }) });
+  if (body.errors?.length) return { error: String(body.errors[0]?.message ?? "GraphQL error") };
+  return { data: body.data };
+}
+function hostOf2(input) {
+  try {
+    return new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`).hostname.toLowerCase();
+  } catch {
+    return input.toLowerCase();
+  }
+}
+async function findZone(f, token, input) {
+  const parts = hostOf2(input).replace(/^www\./, "").split(".");
+  for (let i = 0; i < parts.length - 1; i++) {
+    const name = parts.slice(i).join(".");
+    const body = await cf(f, token, `/zones?name=${encodeURIComponent(name)}`);
+    const z = body.result?.[0];
+    if (z) return { id: z.id, name: z.name, plan: z.plan?.name ?? "", accountId: z.account?.id ?? "" };
+  }
+  throw new CfError(`No Cloudflare zone for ${hostOf2(input)} is visible to this token. Check the domain is on Cloudflare and the token includes that zone.`);
+}
+var PATTERNS = BOTS.filter((b) => !/no separate crawler/.test(b.purpose)).map((b) => ({
+  token: b.token,
+  owner: b.owner,
+  purpose: b.purpose,
+  re: b.token === "Bingbot" ? /bingbot/i : b.token === "Meta-ExternalAgent" ? /meta-external(agent|fetcher)/i : new RegExp(b.token.replace(/[-]/g, "\\-"), "i")
+}));
+function matchBot(ua) {
+  for (const p of PATTERNS) if (p.re.test(ua)) return p.token;
+  return null;
+}
+var AI_CATS = ["AI Crawler", "AI Search", "AI Assistant"];
+var BLOCKED = (s) => s === 403 || s === 429 || s === 503;
+var iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
+async function logReport(f, token, input, days = 30) {
+  const zone = await findZone(f, token, input);
+  const host3 = hostOf2(input);
+  const now = /* @__PURE__ */ new Date();
+  const windows = [...new Set([days, 30, 14, 7, 3, 1].filter((d) => d <= days))];
+  let used = 0, base = null, lastErr = "";
+  for (const d of windows) {
+    const s = iso(new Date(now.getTime() - d * 864e5));
+    const flt = (extra = "") => `{datetime_geq:"${s}",datetime_lt:"${iso(now)}"${extra}}`;
+    const q = `{viewer{zones(filter:{zoneTag:"${zone.id}"}){
+      total:httpRequestsAdaptiveGroups(limit:1,filter:${flt()}){count}
+      html:httpRequestsAdaptiveGroups(limit:1,filter:${flt(',edgeResponseContentTypeName:"html"')}){count}
+      cats:httpRequestsAdaptiveGroups(limit:30,orderBy:[count_DESC],filter:${flt()}){count dimensions{verifiedBotCategory}}
+      ua:httpRequestsAdaptiveGroups(limit:5000,orderBy:[count_DESC],filter:${flt(',edgeResponseContentTypeName:"html"')}){count dimensions{userAgent verifiedBotCategory edgeResponseStatus}}
+      pages:httpRequestsAdaptiveGroups(limit:15,orderBy:[count_DESC],filter:${flt(`,edgeResponseContentTypeName:"html",verifiedBotCategory_in:${JSON.stringify(AI_CATS)}`)}){count dimensions{clientRequestPath}}
+      errs:httpRequestsAdaptiveGroups(limit:15,orderBy:[count_DESC],filter:${flt(',verifiedBotCategory_neq:"",edgeResponseStatus_geq:400,edgeResponseStatus_lt:600')}){count dimensions{clientRequestPath edgeResponseStatus}}
+    }}}`;
+    const r = await gql(f, token, q);
+    if (r.data?.viewer?.zones?.[0]) {
+      used = d;
+      base = r.data.viewer.zones[0];
+      break;
+    }
+    lastErr = r.error ?? "no data";
+    if (!/time range|exceed|quota|limit|too far|retention|not allowed|can't|cannot/i.test(lastErr)) break;
+  }
+  if (!base) throw new CfError(`Cloudflare's analytics API didn't return request data for ${zone.name} (${lastErr}). The token needs Zone > Analytics > Read.`);
+  const stats = /* @__PURE__ */ new Map();
+  let htmlSampled = 0, browserHtml = 0;
+  for (const row of base.ua ?? []) {
+    const n4 = Number(row.count) || 0;
+    const ua = String(row.dimensions?.userAgent ?? "");
+    const cat = String(row.dimensions?.verifiedBotCategory ?? "");
+    const st = Number(row.dimensions?.edgeResponseStatus) || 0;
+    htmlSampled += n4;
+    const tok = matchBot(ua);
+    if (!tok) {
+      if (!cat && /^Mozilla\/5\.0 \(/.test(ua) && /AppleWebKit|Gecko\//.test(ua) && !/bot|crawl|spider|headless|preview/i.test(ua) && st < 400) browserHtml += n4;
+      continue;
+    }
+    const p = PATTERNS.find((x) => x.token === tok);
+    const s = stats.get(tok) ?? { token: tok, owner: p.owner, purpose: p.purpose, requests: 0, verified: 0, served: 0, blocked: 0, verifiedBlocked: 0, verifiedServed: 0 };
+    s.requests += n4;
+    if (cat) s.verified += n4;
+    if (st > 0 && st < 400) {
+      s.served += n4;
+      if (cat) s.verifiedServed += n4;
+    }
+    if (BLOCKED(st)) {
+      s.blocked += n4;
+      if (cat) s.verifiedBlocked += n4;
+    }
+    stats.set(tok, s);
+  }
+  let rum = null, rumNote;
+  if (zone.accountId) {
+    const s = iso(new Date(now.getTime() - used * 864e5));
+    const r = await gql(f, token, `{viewer{accounts(filter:{accountTag:"${zone.accountId}"}){rumPageloadEventsAdaptiveGroups(limit:1,filter:{datetime_geq:"${s}",datetime_lt:"${iso(now)}",requestHost:"${host3}"}){count sum{visits}}}}}`).catch(() => ({ error: "unavailable" }));
+    const g = r.data?.viewer?.accounts?.[0]?.rumPageloadEventsAdaptiveGroups?.[0];
+    if (g && (Number(g.count) || Number(g.sum?.visits))) rum = { visits: Number(g.sum?.visits) || 0, pageloads: Number(g.count) || 0 };
+    else rumNote = r.error ? "Cloudflare Web Analytics wasn't readable with this token (add Account > Account Analytics > Read)." : `Cloudflare Web Analytics has no data for ${host3} (it's off or uses a different hostname).`;
+  }
+  const num2 = (x) => Number(x?.[0]?.count) || 0;
+  return {
+    zone,
+    host: host3,
+    days: used,
+    requested: days,
+    from: iso(new Date(now.getTime() - used * 864e5)).slice(0, 10),
+    to: iso(now).slice(0, 10),
+    total: num2(base.total),
+    html: num2(base.html),
+    htmlSampled,
+    categories: (base.cats ?? []).filter((c) => c.dimensions?.verifiedBotCategory).map((c) => ({ category: c.dimensions.verifiedBotCategory, requests: Number(c.count) || 0 })),
+    bots: [...stats.values()].sort((a, b) => b.requests - a.requests),
+    aiPages: (base.pages ?? []).map((p) => ({ path: String(p.dimensions?.clientRequestPath ?? ""), requests: Number(p.count) || 0 })),
+    botErrors: (base.errs ?? []).map((p) => ({ path: String(p.dimensions?.clientRequestPath ?? ""), status: Number(p.dimensions?.edgeResponseStatus) || 0, requests: Number(p.count) || 0 })),
+    browserHtml,
+    rum,
+    rumNote
+  };
+}
+var n2 = (x) => x.toLocaleString("en-US");
+var pct = (a, b) => b ? `${Math.round(a / b * 100)}%` : "\u2013";
+var cell = (s) => s.replace(/\|/g, "\\|").slice(0, 80);
+function logMarkdown(r, analytics) {
+  const L = [];
+  L.push(`# Log file analysis for AI search: ${r.host}`, "");
+  L.push(`Cloudflare zone ${r.zone.name}${r.zone.plan ? ` (${r.zone.plan})` : ""}, ${r.from} to ${r.to} (${r.days} day${r.days === 1 ? "" : "s"}${r.days < r.requested ? `; your plan's analytics only go back ${r.days} days` : ""}). Counts are from Cloudflare's sampled request analytics.`, "");
+  L.push(`- Requests: ${n2(r.total)} total, ${n2(r.html)} for HTML pages`);
+  const ai = r.categories.filter((c) => AI_CATS.includes(c.category));
+  const aiTotal = ai.reduce((a, c) => a + c.requests, 0);
+  L.push(`- Verified AI bots (Cloudflare categories AI Crawler, AI Search, AI Assistant): ${n2(aiTotal)} requests`, "");
+  if (r.categories.length) {
+    L.push("## Verified bots by category", "", "| Category | Requests |", "|---|---:|");
+    for (const c of r.categories.slice(0, 12)) L.push(`| ${c.category} | ${n2(c.requests)} |`);
+    L.push("");
+  }
+  if (r.bots.length) {
+    L.push("## AI and search crawlers on your HTML pages", "", "Requests that use each crawler's name. Verified means Cloudflare confirmed the request came from that operator. Unverified requests that were still served are the ones to look at: either fakes getting through, or a real operator Cloudflare doesn't verify.", "", "| Crawler | Owner | Requests | Verified | Verified, served | Unverified, served | Blocked/challenged |", "|---|---|---:|---:|---:|---:|---:|");
+    for (const b of r.bots) L.push(`| ${b.token} | ${b.owner} | ${n2(b.requests)} | ${pct(b.verified, b.requests)} | ${n2(b.verifiedServed)} | ${n2(b.served - b.verifiedServed)} | ${n2(b.blocked)} |`);
+    L.push("");
+  }
+  const findings = [];
+  const realBlocked = r.bots.filter((b) => b.verifiedBlocked > 0).sort((a, b) => b.verifiedBlocked - a.verifiedBlocked);
+  if (realBlocked.length) findings.push(`**Real crawlers are being blocked.** Verified requests got 403/429/503 from: ${realBlocked.map((b) => `${b.token} (${n2(b.verifiedBlocked)})`).join(", ")}. Check your WAF, Bot Fight Mode and rate-limit rules: these are citations you're turning away.`);
+  const leaks = r.bots.map((b) => ({ b, u: b.served - b.verifiedServed })).filter((x) => x.u >= 50).sort((a, b) => b.u - a.u);
+  const fakeTotal = r.bots.reduce((a, b) => a + (b.requests - b.verified), 0);
+  if (leaks.length) findings.push(`**Unverified requests using crawler names got through:** ${leaks.slice(0, 6).map((x) => `${x.b.token} (${n2(x.u)})`).join(", ")}. Some are scrapers borrowing the name; some may be real operators that Cloudflare doesn't verify. Before allowing a crawler by name, match its source network to the operator's published IP ranges (ai_crawler_check lists them). Monitoring tools that send crawler user agents, including your own, show up here too.`);
+  else if (fakeTotal >= 50) findings.push(`**Fake crawlers are being stopped:** ${n2(fakeTotal)} unverified requests used AI or search crawler names, and almost none were served.`);
+  if (r.botErrors.length) findings.push(`**Crawler-only errors:** verified bots hit ${n2(r.botErrors.reduce((a, e) => a + e.requests, 0))} error responses on the paths below. Broken links, redirects to nowhere and timeouts often show up here first, before any visitor reports them.`);
+  if (aiTotal === 0) findings.push("**No verified AI bot traffic** in this window. Check that robots.txt, your firewall and Cloudflare's AI crawler settings (AI Crawl Control) aren't blocking them, and that your key pages are linked and in your sitemap.");
+  if (findings.length) L.push("## What stands out", "", ...findings.map((x) => `- ${x}`), "");
+  if (r.aiPages.length) {
+    L.push("## Pages AI bots read most", "", "Compare this with the pages you want cited. A page that never appears here can't be quoted.", "", "| Page | Requests |", "|---|---:|");
+    for (const p of r.aiPages) L.push(`| ${cell(p.path)} | ${n2(p.requests)} |`);
+    L.push("");
+  }
+  if (r.botErrors.length) {
+    L.push("## Errors served to verified bots", "", "| Page | Status | Requests |", "|---|---:|---:|");
+    for (const e of r.botErrors) L.push(`| ${cell(e.path)} | ${e.status} | ${n2(e.requests)} |`);
+    L.push("");
+  }
+  L.push("## Logs vs analytics", "");
+  L.push(`- HTML page requests from browser-like user agents that aren't known bots: ${n2(r.browserHtml)}. This still includes scrapers that pretend to be browsers, so treat it as a ceiling for human page views.`);
+  if (r.rum) L.push(`- Cloudflare Web Analytics (cookieless script): ${n2(r.rum.visits)} visits, ${n2(r.rum.pageloads)} page loads. This is usually the closest count of real people.`);
+  else if (r.rumNote) L.push(`- ${r.rumNote}`);
+  if (analytics) L.push(`- ${analytics.label}: ${n2(analytics.sessions)}. Analytics only count visitors who run the tag and accept cookies; AI crawlers never appear there.`);
+  L.push(`- Verified AI bot requests: ${n2(aiTotal)}. These appear only in logs.`, "");
+  L.push("Data: Cloudflare GraphQL Analytics API (https://developers.cloudflare.com/analytics/graphql-api/). Your token was used only to call Cloudflare.");
+  return L.join("\n");
+}
+
 // src/bing.ts
 var BASE2 = "https://ssl.bing.com/webmaster/api.svc/json/";
 var BING_KEY_HELP = "Bing Webmaster Tools needs your own API key. In Bing Webmaster Tools (https://www.bing.com/webmasters), open Settings (the gear) > API access > API key, generate a key, then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The key stays on your computer and is only sent to Bing.";
@@ -2328,8 +2517,8 @@ async function bingReport(f, key, siteUrl, sections) {
   if (quota) out.quota = { daily: Number(quota.DailyQuota) || 0, monthly: Number(quota.MonthlyQuota) || 0 };
   return out;
 }
-var n2 = (v) => v.toLocaleString("en-US");
-var pct = (a, b) => b ? `${a >= b ? "+" : ""}${Math.round((a - b) / b * 100)}%` : "n/a";
+var n3 = (v) => v.toLocaleString("en-US");
+var pct2 = (a, b) => b ? `${a >= b ? "+" : ""}${Math.round((a - b) / b * 100)}%` : "n/a";
 function sitesMarkdown(sites) {
   if (!sites.length) return "No sites in this Bing Webmaster Tools account yet. Add and verify one at https://www.bing.com/webmasters (you can import sites from Google Search Console).";
   return ["## Sites in your Bing Webmaster Tools account", "", ...sites.map((s) => `- ${s.url}${s.verified ? "" : " (not verified)"}`), "", 'Ask for a report on one of these, e.g. "Bing queries for ' + sites[0].url + '".'].join("\n");
@@ -2342,8 +2531,8 @@ function bingMarkdown(r, limit = 15) {
       "### Bing search traffic",
       "| | Last 28 days | Previous 28 days | Change |",
       "|---|---|---|---|",
-      `| Clicks | ${n2(a.clicks)} | ${n2(b.clicks)} | ${pct(a.clicks, b.clicks)} |`,
-      `| Impressions | ${n2(a.impressions)} | ${n2(b.impressions)} | ${pct(a.impressions, b.impressions)} |`,
+      `| Clicks | ${n3(a.clicks)} | ${n3(b.clicks)} | ${pct2(a.clicks, b.clicks)} |`,
+      `| Impressions | ${n3(a.impressions)} | ${n3(b.impressions)} | ${pct2(a.impressions, b.impressions)} |`,
       `| CTR | ${a.impressions ? (a.clicks / a.impressions * 100).toFixed(1) + "%" : "n/a"} | ${b.impressions ? (b.clicks / b.impressions * 100).toFixed(1) + "%" : "n/a"} | |`,
       "",
       `Data through ${r.traffic.to || "n/a"}. Bing's index also feeds Microsoft Copilot and several other search and AI tools, so it matters beyond bing.com.`,
@@ -2351,14 +2540,14 @@ function bingMarkdown(r, limit = 15) {
     );
   }
   const table = (title, agg, label) => {
-    L.push(`### ${title}`, agg.from ? `${agg.from} to ${agg.to}, ${n2(agg.rows.length)} ${label.toLowerCase()}s` : "", "");
+    L.push(`### ${title}`, agg.from ? `${agg.from} to ${agg.to}, ${n3(agg.rows.length)} ${label.toLowerCase()}s` : "", "");
     if (!agg.rows.length) {
       L.push("No data yet. New sites can take a few days to show data.", "");
       return;
     }
     L.push(`| ${label} | Clicks | Impressions | CTR | Avg position |`, "|---|---|---|---|---|");
     for (const q of agg.rows.slice(0, limit)) {
-      L.push(`| ${q.key.replace(/\|/g, "\\|")} | ${n2(q.clicks)} | ${n2(q.impressions)} | ${q.impressions ? (q.clicks / q.impressions * 100).toFixed(1) + "%" : ""} | ${q.position ? q.position.toFixed(1) : ""} |`);
+      L.push(`| ${q.key.replace(/\|/g, "\\|")} | ${n3(q.clicks)} | ${n3(q.impressions)} | ${q.impressions ? (q.clicks / q.impressions * 100).toFixed(1) + "%" : ""} | ${q.position ? q.position.toFixed(1) : ""} |`);
     }
     L.push("");
   };
@@ -2369,10 +2558,10 @@ function bingMarkdown(r, limit = 15) {
     if (!r.crawl) L.push("No crawl data yet.");
     else {
       const c = r.crawl;
-      L.push(`Latest day (${c.date}): **${n2(c.inIndex)} pages in Bing's index**, ${n2(c.crawled)} crawled, ${n2(c.errors)} crawl errors (${n2(c.c4xx)} 4xx, ${n2(c.c5xx)} 5xx), ${n2(c.robotsBlocked)} blocked by robots.txt, ${n2(c.inLinks)} inbound links.`);
+      L.push(`Latest day (${c.date}): **${n3(c.inIndex)} pages in Bing's index**, ${n3(c.crawled)} crawled, ${n3(c.errors)} crawl errors (${n3(c.c4xx)} 4xx, ${n3(c.c5xx)} 5xx), ${n3(c.robotsBlocked)} blocked by robots.txt, ${n3(c.inLinks)} inbound links.`);
       if (c.c5xx > 0) L.push("", "5xx errors mean Bingbot is hitting server errors or a firewall. Check that your CDN/WAF isn't challenging Bingbot.");
     }
-    if (r.quota) L.push("", `URL submission quota: ${n2(r.quota.daily)} today, ${n2(r.quota.monthly)} this month. (IndexNow pings don't use this quota.)`);
+    if (r.quota) L.push("", `URL submission quota: ${n3(r.quota.daily)} today, ${n3(r.quota.monthly)} this month. (IndexNow pings don't use this quota.)`);
     L.push("");
   }
   return L.join("\n").trimEnd();
@@ -2406,7 +2595,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.2";
+var VERSION = "0.3.5";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer2(opts = {}) {
@@ -2852,6 +3041,29 @@ ${md}`;
       })
     );
     register(
+      "log_file_analysis",
+      {
+        title: "Log file analysis for AI search (Cloudflare)",
+        description: "Analyze the user's own Cloudflare request logs for AI search: which AI crawlers, AI search bots and AI assistants (GPTBot, ClaudeBot, ChatGPT-User, Claude-User, PerplexityBot, Applebot, Meta and more) fetched the site's pages, how many were verified by Cloudflare versus likely fake, real crawlers being blocked or challenged, error pages served only to bots, the pages AI bots read most, and log counts next to analytics counts (Cloudflare Web Analytics, plus GA4 sessions if the user gives them). Needs the user's Cloudflare API token and a site proxied through Cloudflare. Uses the Cloudflare GraphQL Analytics API (https://developers.cloudflare.com/analytics/graphql-api/).",
+        inputSchema: {
+          domain: external_exports.string().describe("The site to analyze, e.g. example.com (must be a zone in the user's Cloudflare account)"),
+          days: external_exports.number().int().min(1).max(30).default(30).describe("How many days back. Plans keep different amounts of history; the tool steps down automatically."),
+          analytics_sessions: external_exports.number().int().min(0).optional().describe("Optional: sessions or visits from GA4 (or another analytics tool) for the same period, to compare with the logs"),
+          analytics_label: external_exports.string().default("GA4 sessions").describe("Label for analytics_sessions")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async ({ domain, days, analytics_sessions, analytics_label }) => {
+        try {
+          if (!opts.cloudflareToken) throw new Error(CF_TOKEN_HELP);
+          const r = await logReport(f, opts.cloudflareToken, domain, days);
+          return { content: [{ type: "text", text: logMarkdown(r, analytics_sessions != null ? { sessions: analytics_sessions, label: analytics_label } : void 0) }] };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
+    );
+    register(
       "bing_webmaster",
       {
         title: "Bing Webmaster Tools report",
@@ -2892,6 +3104,7 @@ var server = createServer2({
   psiKey: env("ALCHEMYAGENT_PSI_KEY"),
   bingKey: env("ALCHEMYAGENT_BING_KEY"),
   braveKey: env("ALCHEMYAGENT_BRAVE_KEY"),
+  cloudflareToken: env("ALCHEMYAGENT_CLOUDFLARE_TOKEN"),
   oprKey: env("ALCHEMYAGENT_OPR_KEY"),
   openalexKey: env("ALCHEMYAGENT_OPENALEX_KEY"),
   gsc: { clientId: env("ALCHEMYAGENT_GOOGLE_CLIENT_ID"), clientSecret: env("ALCHEMYAGENT_GOOGLE_CLIENT_SECRET"), serviceAccountFile: env("ALCHEMYAGENT_GOOGLE_SA_FILE") },
