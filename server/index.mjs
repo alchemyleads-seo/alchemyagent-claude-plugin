@@ -1948,8 +1948,26 @@ function registerPrompts(server2, remote) {
       local(`9. If Search Console is connected (gsc_sites works), gsc_ai_queries for the last 90 days`),
       "",
       REPORT_RULES,
-      "- Group fixes under: Access (can AI reach it), Readability (can AI read it), Identity (does AI know who you are), Authority (does AI trust you), Speed."
+      "- Group fixes under: Access (can AI reach it), Readability (can AI read it), Identity (does AI know who you are), Authority (does AI trust you), Speed.",
+      local("- End with one line on which of the user's own data sources aren't connected yet (run data_connections) and what connecting them would add to this audit.")
     ].filter(Boolean).join("\n"))
+  );
+  if (!remote) server2.registerPrompt(
+    "connect_your_data",
+    {
+      title: "Connect your data",
+      description: "Set up Search Console, Bing Webmaster Tools and Cloudflare so AlchemyAgent can rank fixes by your real traffic and crawler data.",
+      argsSchema: {}
+    },
+    () => msg([
+      "Help me connect my own data to AlchemyAgent.",
+      "",
+      "1. Run data_connections and show me what's connected.",
+      "2. Walk me through connecting the most valuable missing source first (Search Console, then Bing Webmaster Tools, then Cloudflare), one step at a time, waiting for me between steps.",
+      "3. When Search Console has an OAuth client but no sign-in, run gsc_connect.",
+      "4. After each connection, run one quick check that uses it (gsc_sites, bing_webmaster, log_file_analysis) to confirm it works, and tell me one thing it found.",
+      "Never ask me to paste a key into the chat: keys go in AlchemyAgent's settings."
+    ].join("\n"))
   );
   server2.registerPrompt(
     "ai_crawler_fix_plan",
@@ -2807,7 +2825,8 @@ function cardHtml(c, accent) {
   if (c.type === "bars") {
     const max = Math.max(...c.rows.map((r) => r.value), 1);
     const colors = [accent, "#f98600", "#e8e8e8", "#9ad1ff", "#b9f6ca"];
-    return title + c.rows.slice(0, 5).map((r, i) => `<div class="bar"><div class="bl"><span><b>${esc(r.label)}</b>${r.note ? ` <i>\xB7 ${esc(r.note)}</i>` : ""}</span><b class="num">${fmt3(r.value)}</b></div><div class="track"><div style="width:${Math.max(r.value / max * 100, 1.6).toFixed(1)}%;background:${colors[i % colors.length]}"></div></div></div>`).join("") + foot(c.footer);
+    const dense = c.rows.length + (c.footer ? 1 : 0) >= 5;
+    return title + c.rows.slice(0, 5).map((r, i) => `<div class="bar${dense ? " dense" : ""}"><div class="bl"><span><b>${esc(r.label)}</b>${r.note ? ` <i>\xB7 ${esc(r.note)}</i>` : ""}</span><b class="num">${fmt3(r.value)}</b></div><div class="track"><div style="width:${Math.max(r.value / max * 100, 1.6).toFixed(1)}%;background:${colors[i % colors.length]}"></div></div></div>`).join("") + foot(c.footer);
   }
   if (c.type === "stats") {
     return title + `<div class="stats">${c.rows.slice(0, 4).map((r) => `<div><span class="big" style="color:${accent}${r.value.length > 9 ? ";font-size:28px" : ""}">${esc(r.value)}</span><span>${esc(r.label)}</span></div>`).join("")}</div>`;
@@ -2853,6 +2872,7 @@ h1{font-family:'${hf}',sans-serif;font-weight:400;font-size:${long ? 40 : 46}px;
 .card h3{font:700 13px '${bf}';letter-spacing:.14em;color:${accent === "#111111" ? "#fff" : accent};margin-bottom:18px;text-transform:uppercase}
 .bar{margin:0 0 22px}.bl{display:flex;justify-content:space-between;font-size:15px;margin-bottom:8px}.bl i{color:#9a9a9a;font-style:normal}.num{font-family:'${hf}'}
 .track{height:26px;background:#222;border-radius:6px}.track div{height:26px;border-radius:6px}
+.bar.dense{margin:0 0 13px}.bar.dense .bl{margin-bottom:6px}.bar.dense .track,.bar.dense .track div{height:18px}
 .foot{border-top:1px solid #2c2c2c;padding-top:18px;display:flex;align-items:baseline;gap:14px}.foot span:last-child{font-size:15px;line-height:1.35;color:#d8d8d8}
 .big{font:400 40px '${hf}'}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:26px 22px;margin-top:8px}.stats div{display:flex;flex-direction:column;gap:6px}.stats span:last-child{font-size:15px;color:#d8d8d8;line-height:1.35}
@@ -2864,11 +2884,40 @@ h1{font-family:'${hf}',sans-serif;font-weight:400;font-size:${long ? 40 : 46}px;
 <div class="card">${cardHtml(s.card, accent === bg && /^#?f/i.test(bg) ? bg : accent)}</div>
 ${s.source ? `<div class="src">${esc(s.source)}</div>` : ""}${s.site ? `<div class="url">${esc(s.site)}</div>` : ""}</body></html>`;
 }
+var CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n4 = 0; n4 < 256; n4++) {
+    let c = n4;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+    t[n4] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(b) {
+  let c = 4294967295;
+  for (const x of b) c = CRC_TABLE[(c ^ x) & 255] ^ c >>> 8;
+  return (c ^ 4294967295) >>> 0;
+}
+function addPngText(png, entries) {
+  const iend = png.lastIndexOf(Buffer.from("IEND", "latin1")) - 4;
+  if (iend < 8) return png;
+  const chunks = Object.entries(entries).map(([k, v]) => {
+    const data = Buffer.concat([Buffer.from(k, "latin1"), Buffer.from([0]), Buffer.from(v, "latin1")]);
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const type = Buffer.from("tEXt", "latin1");
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([type, data])));
+    return Buffer.concat([len, type, data, crc]);
+  });
+  return Buffer.concat([png.subarray(0, iend), ...chunks, png.subarray(iend)]);
+}
+var CREDIT = { Software: "AlchemyAgent (https://alchemyagent.ai)", Comment: "Created with AlchemyAgent, https://alchemyagent.ai" };
 function findChrome() {
   const c = process.platform === "darwin" ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"] : process.platform === "win32" ? [`${process.env["PROGRAMFILES"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["PROGRAMFILES(X86)"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["LOCALAPPDATA"]}\\Google\\Chrome\\Application\\chrome.exe`, `${process.env["PROGRAMFILES(X86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`] : ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/microsoft-edge"];
   return c.find((p) => p && existsSync(p)) ?? null;
 }
-async function renderFeatured(spec, outDir, name = "featured") {
+async function renderFeatured(spec, outDir, name = "featured", credit = true) {
   const dir = resolve((outDir ?? join3(homedir3(), "Downloads", "alchemyagent-images")).replace(/^~(?=\/)/, homedir3()));
   await mkdir3(dir, { recursive: true });
   const slug2 = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "featured";
@@ -2877,7 +2926,70 @@ async function renderFeatured(spec, outDir, name = "featured") {
   const chrome = findChrome();
   if (!chrome) return { html, note: "No Chrome, Edge, Chromium or Brave found, so only the HTML was written. Open it in a browser at 1200x630 and screenshot it, or install Chrome and run again." };
   await new Promise((ok) => execFile(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2", "--window-size=1200,630", "--virtual-time-budget=5000", `--screenshot=${png}`, `file://${html}`], { timeout: 6e4 }, () => ok()));
-  return existsSync(png) ? { html, png } : { html, note: `Chrome didn't produce a screenshot. The HTML is at ${html}.` };
+  if (!existsSync(png)) return { html, note: `Chrome didn't produce a screenshot. The HTML is at ${html}.` };
+  if (credit) await writeFile3(png, addPngText(await readFile3(png), CREDIT));
+  return { html, png };
+}
+
+// src/connections.ts
+import { existsSync as existsSync2 } from "node:fs";
+function connState(o, tokenFile) {
+  return {
+    gscOAuth: !!(o.gsc?.clientId && o.gsc?.clientSecret),
+    gscSignedIn: existsSync2(tokenFile),
+    gscServiceAccount: !!o.gsc?.serviceAccountFile,
+    bing: !!o.bingKey,
+    cloudflare: !!o.cloudflareToken,
+    brave: !!o.braveKey,
+    psi: !!o.psiKey
+  };
+}
+var SETTINGS = "Claude Desktop: Settings > Extensions > AlchemyAgent > Configure. Claude Code: run /plugin, open AlchemyAgent and edit its settings.";
+function connectionsMarkdown(s) {
+  const gsc2 = s.gscServiceAccount || s.gscOAuth && s.gscSignedIn;
+  const rows = [
+    [
+      "Google Search Console",
+      gsc2,
+      "Your real Google queries, clicks, impressions and positions, and which queries come from AI assistants. The single most useful source: fixes get ranked by what actually earns traffic.",
+      s.gscOAuth && !s.gscSignedIn ? 'Your OAuth client is set. Ask Claude to "connect Search Console" (gsc_connect) and sign in once.' : `Add a Google OAuth client ID and secret (Google Cloud > Credentials > OAuth client ID > Desktop app, with the Search Console API enabled), or a service account JSON file whose email is a user on your property. ${SETTINGS} Then ask Claude to "connect Search Console".`
+    ],
+    [
+      "Bing Webmaster Tools",
+      s.bing,
+      "Bing traffic, top queries and pages, index and crawl errors. Bing's index also feeds Microsoft Copilot and other AI assistants.",
+      `Bing Webmaster Tools > Settings (gear) > API access > API key, then paste it into bing_api_key. ${SETTINGS}`
+    ],
+    [
+      "Cloudflare logs",
+      s.cloudflare,
+      "Which AI crawlers and assistants actually read your pages, fake bots, real crawlers you're blocking, and bot-only errors. Analytics tools never see any of this.",
+      `Cloudflare > My Profile > API Tokens > Create Token > Custom: Zone > Analytics > Read and Zone > Zone > Read (add Account > Account Analytics > Read for Web Analytics). Paste it into cloudflare_api_token. ${SETTINGS} Needs your site proxied through Cloudflare.`
+    ],
+    [
+      "Google Analytics 4",
+      false,
+      "Sessions, conversions and revenue by landing page and channel, including AI-assistant referrals.",
+      "Coming soon. Until then, tell Claude your GA4 numbers (for example, sessions for the last 28 days) and tools like log_file_analysis will compare them with your logs."
+    ],
+    ["Brave Search API", s.brave, "Where you rank in Brave Search, an independent index several AI tools use.", `Free plan at api-dashboard.search.brave.com; paste the key into brave_api_key. ${SETTINGS}`],
+    ["PageSpeed Insights key", s.psi, "Optional: skips the shared daily limit on speed checks.", `Free key from Google Cloud with the PageSpeed Insights API enabled; paste it into psi_api_key. ${SETTINGS}`]
+  ];
+  const on = rows.filter((r) => r[1]).length;
+  const L = [
+    `# Your data connections: ${on} of ${rows.length} connected`,
+    "",
+    "Every public-site check works without these. Connecting your own data is what lets AlchemyAgent rank fixes by real traffic, real queries and real crawler visits instead of best practice alone. Keys and tokens stay on your computer and only go to the service they belong to.",
+    ""
+  ];
+  for (const [name, ok, why, how] of rows) {
+    L.push(`## ${ok ? "\u2713" : "\u25CB"} ${name}${ok ? ": connected" : ""}`, why);
+    if (!ok) L.push("", `**How to connect:** ${how}`);
+    L.push("");
+  }
+  const next = rows.find((r) => !r[1] && r[0] !== "Google Analytics 4");
+  if (next) L.push(`**Start with:** ${next[0]}.`);
+  return L.join("\n").trimEnd();
 }
 
 // src/bing.ts
@@ -3067,7 +3179,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.6";
+var VERSION = "0.3.7";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer2(opts = {}) {
@@ -3513,10 +3625,20 @@ ${md}`;
       })
     );
     register(
+      "data_connections",
+      {
+        title: "Connect your data (setup status)",
+        description: "Show which of the user's own data sources AlchemyAgent can use (Google Search Console, Bing Webmaster Tools, Cloudflare logs, Brave Search, PageSpeed key; GA4 coming soon), why each one matters, and exactly how to connect the missing ones. Use this first with a new user, when a tool needs a key that isn't set, or when someone asks how to get better, data-driven recommendations.",
+        inputSchema: {},
+        annotations: { readOnlyHint: true, openWorldHint: false }
+      },
+      async () => ({ content: [{ type: "text", text: connectionsMarkdown(connState(opts, TOKEN_FILE)) }] })
+    );
+    register(
       "featured_image",
       {
         title: "Featured image generator (data card)",
-        description: "Make a blog featured image or social share image (1200x630, rendered at 2400x1260 PNG) from a post's own data: a headline and subhead on the left and a data card on the right (bar chart, big stats, before/after ratings, or a key-points list), in the user's brand colors with their SVG logo. Use real numbers from the post; never invent data. Renders locally with the user's Chrome or Edge and saves the PNG and its HTML source (default folder ~/Downloads/alchemyagent-images). Original data visuals help image search and give AI systems something concrete to describe; write descriptive alt text from the same numbers.",
+        description: "Make a blog featured image or social share image (1200x630, rendered at 2400x1260 PNG) from a post's own data: a headline and subhead on the left and a data card on the right (bar chart, big stats, before/after ratings, or a key-points list), in the user's brand colors with their SVG logo. Use real numbers from the post; never invent data. Renders locally with the user's Chrome or Edge and saves the PNG and its HTML source (default folder ~/Downloads/alchemyagent-images). Original data visuals help image search and give AI systems something concrete to describe; write descriptive alt text from the same numbers. By default the PNG carries an invisible metadata credit to AlchemyAgent (no visible mark); credit: false removes it.",
         inputSchema: {
           headline: external_exports.string().max(80).describe("Short headline, ideally under 40 characters"),
           subhead: external_exports.string().max(140).optional(),
@@ -3537,14 +3659,15 @@ ${md}`;
             external_exports.object({ type: external_exports.literal("list"), title: external_exports.string().optional(), rows: external_exports.array(external_exports.string()).min(1).max(6) })
           ]).describe("The data card. bars: up to 5 values; stats: up to 4 big numbers; before_after: ratings on a scale; list: up to 6 short points"),
           out_dir: external_exports.string().optional().describe("Folder to save into. Default ~/Downloads/alchemyagent-images"),
-          file_name: external_exports.string().optional().describe("File name without extension, e.g. the post slug")
+          file_name: external_exports.string().optional().describe("File name without extension, e.g. the post slug"),
+          credit: external_exports.boolean().default(true).describe("Add an invisible credit to the PNG's metadata ('Created with AlchemyAgent, https://alchemyagent.ai'). Nothing is drawn on the image. Set false to leave it out.")
         },
         annotations: { readOnlyHint: false, openWorldHint: false }
       },
       async (a) => {
         try {
-          const r = await renderFeatured({ headline: a.headline, subhead: a.subhead, eyebrow: a.eyebrow, source: a.source, site: a.site, brand: a.brand, logoSvg: a.logo_svg, background: a.background, ink: a.ink, accent: a.accent, headingFont: a.heading_font, bodyFont: a.body_font, card: a.card }, a.out_dir, a.file_name ?? a.headline);
-          const text = [r.png ? `Saved ${r.png} (2400x1260) and its source ${r.html}.` : `Wrote ${r.html}.`, r.note ?? "", "Upload it as the post's featured image (most SEO plugins also use it as og:image) and write alt text that states what the chart shows, with the numbers."].filter(Boolean).join("\n");
+          const r = await renderFeatured({ headline: a.headline, subhead: a.subhead, eyebrow: a.eyebrow, source: a.source, site: a.site, brand: a.brand, logoSvg: a.logo_svg, background: a.background, ink: a.ink, accent: a.accent, headingFont: a.heading_font, bodyFont: a.body_font, card: a.card }, a.out_dir, a.file_name ?? a.headline, a.credit !== false);
+          const text = [r.png ? `Saved ${r.png} (2400x1260) and its source ${r.html}.` : `Wrote ${r.html}.`, r.note ?? "", a.credit !== false && r.png ? `The PNG's metadata includes an invisible credit ("Created with AlchemyAgent"); nothing is drawn on the image. Pass credit: false to leave it out.` : "", "Upload it as the post's featured image (most SEO plugins also use it as og:image) and write alt text that states what the chart shows, with the numbers."].filter(Boolean).join("\n");
           const content = [{ type: "text", text }];
           if (r.png) content.push({ type: "image", data: (await (await import("node:fs/promises")).readFile(r.png)).toString("base64"), mimeType: "image/png" });
           return { content };
