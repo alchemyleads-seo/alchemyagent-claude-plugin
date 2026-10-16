@@ -1,9 +1,84 @@
 {
   "name": "alchemyagent",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "AI search toolkit for Claude Code: AI crawler access, what AI sees on a page, llms.txt and agent readiness, brand presence (Wikidata, Wikipedia, news, research, communities), speed, schema, Bing, Brave and your own Search Console. Plus skills for audits, llms.txt and robots.txt AI policy.",
-  "author": { "name": "AlchemyLeads", "email": "support@alchemyagent.ai", "url": "https://alchemyleads.com" },
+  "author": {
+    "name": "AlchemyLeads",
+    "email": "support@alchemyagent.ai",
+    "url": "https://alchemyleads.com"
+  },
   "homepage": "https://alchemyagent.ai",
-  "license": "UNLICENSED",
-  "keywords": ["seo", "ai search", "geo", "llms.txt", "robots.txt", "search console", "mcp"]
+  "keywords": [
+    "seo",
+    "ai search",
+    "geo",
+    "llms.txt",
+    "robots.txt",
+    "search console",
+    "mcp"
+  ],
+  "displayName": "AlchemyAgent",
+  "repository": "https://github.com/alchemyleads-seo/alchemyagent-claude-plugin",
+  "icon": "./icon.png",
+  "documentationUrl": "https://alchemyagent.ai",
+  "supportUrl": "https://alchemyagent.ai/#support",
+  "privacyPolicyUrl": "https://alchemyleads.com/privacy-policy/#alchemyagent-free-tools",
+  "termsOfServiceUrl": "https://alchemyleads.com/terms-of-use/",
+  "userConfig": {
+    "google_client_id": {
+      "type": "string",
+      "title": "Google OAuth client ID (Search Console)",
+      "description": "Optional. A Desktop-app OAuth client from your Google Cloud project with the Search Console API enabled. Then ask Claude to connect Search Console.",
+      "sensitive": false,
+      "required": false
+    },
+    "google_client_secret": {
+      "type": "string",
+      "title": "Google OAuth client secret (Search Console)",
+      "description": "The client secret for the Desktop-app client above. Stored in your system keychain.",
+      "sensitive": true,
+      "required": false
+    },
+    "google_service_account_file": {
+      "type": "file",
+      "title": "Google service account key file (Search Console, alternative)",
+      "description": "Optional alternative to signing in: a service account JSON key whose email is a user on your Search Console property.",
+      "required": false
+    },
+    "bing_api_key": {
+      "type": "string",
+      "title": "Bing Webmaster Tools API key",
+      "description": "Optional. Bing Webmaster Tools > Settings > API access. Only sent to Bing.",
+      "sensitive": true,
+      "required": false
+    },
+    "brave_api_key": {
+      "type": "string",
+      "title": "Brave Search API key",
+      "description": "Optional. Enables Brave Search rankings. Free plan at api-dashboard.search.brave.com. Only sent to Brave.",
+      "sensitive": true,
+      "required": false
+    },
+    "opr_api_key": {
+      "type": "string",
+      "title": "Open PageRank API key",
+      "description": "Optional. Adds a 0-10 link-authority score to the authority check. Free at domcop.com/openpagerank.",
+      "sensitive": true,
+      "required": false
+    },
+    "openalex_api_key": {
+      "type": "string",
+      "title": "OpenAlex API key",
+      "description": "Optional. Your own OpenAlex quota for research citations (openalex.org/settings/api).",
+      "sensitive": true,
+      "required": false
+    },
+    "psi_api_key": {
+      "type": "string",
+      "title": "PageSpeed Insights API key",
+      "description": "Optional. Your own Google PageSpeed Insights quota instead of the shared one.",
+      "sensitive": true,
+      "required": false
+    }
+  }
 }

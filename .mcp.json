@@ -2,16 +2,18 @@
   "mcpServers": {
     "alchemyagent": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/server/index.js"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/server/index.mjs"
+      ],
       "env": {
-        "ALCHEMYAGENT_PSI_KEY": "${ALCHEMYAGENT_PSI_KEY:-}",
-        "ALCHEMYAGENT_BING_KEY": "${ALCHEMYAGENT_BING_KEY:-}",
-        "ALCHEMYAGENT_BRAVE_KEY": "${ALCHEMYAGENT_BRAVE_KEY:-}",
-        "ALCHEMYAGENT_OPR_KEY": "${ALCHEMYAGENT_OPR_KEY:-}",
-        "ALCHEMYAGENT_OPENALEX_KEY": "${ALCHEMYAGENT_OPENALEX_KEY:-}",
-        "ALCHEMYAGENT_GOOGLE_CLIENT_ID": "${ALCHEMYAGENT_GOOGLE_CLIENT_ID:-}",
-        "ALCHEMYAGENT_GOOGLE_CLIENT_SECRET": "${ALCHEMYAGENT_GOOGLE_CLIENT_SECRET:-}",
-        "ALCHEMYAGENT_GOOGLE_SA_FILE": "${ALCHEMYAGENT_GOOGLE_SA_FILE:-}"
+        "ALCHEMYAGENT_PSI_KEY": "${user_config.psi_api_key}",
+        "ALCHEMYAGENT_BING_KEY": "${user_config.bing_api_key}",
+        "ALCHEMYAGENT_BRAVE_KEY": "${user_config.brave_api_key}",
+        "ALCHEMYAGENT_OPR_KEY": "${user_config.opr_api_key}",
+        "ALCHEMYAGENT_OPENALEX_KEY": "${user_config.openalex_api_key}",
+        "ALCHEMYAGENT_GOOGLE_CLIENT_ID": "${user_config.google_client_id}",
+        "ALCHEMYAGENT_GOOGLE_CLIENT_SECRET": "${user_config.google_client_secret}",
+        "ALCHEMYAGENT_GOOGLE_SA_FILE": "${user_config.google_service_account_file}"
       }
     }
   }

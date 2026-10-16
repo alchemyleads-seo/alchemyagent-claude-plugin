@@ -20,16 +20,16 @@ Needs Node.js 18 or later. Using Claude Desktop instead? Install the one-click b
 
 ## Optional keys
 
-Most tools need no key. To unlock the rest, set these environment variables before starting Claude Code. Keys stay on your computer and are only sent to the service they belong to.
+Most tools need no key. When you enable the plugin, Claude Code asks for optional keys (you can skip them and add them later in `/config`). Keys are stored in your system keychain, stay on your computer, and are only sent to the service they belong to.
 
-| Variable | Unlocks |
+| Setting | Unlocks |
 |---|---|
-| `ALCHEMYAGENT_GOOGLE_CLIENT_ID`, `ALCHEMYAGENT_GOOGLE_CLIENT_SECRET` (OAuth Desktop app) or `ALCHEMYAGENT_GOOGLE_SA_FILE` | Google Search Console |
-| `ALCHEMYAGENT_BING_KEY` | Bing Webmaster Tools |
-| `ALCHEMYAGENT_BRAVE_KEY` | Brave Search rankings |
-| `ALCHEMYAGENT_OPR_KEY` | Open PageRank scores |
-| `ALCHEMYAGENT_OPENALEX_KEY` | Your own OpenAlex quota |
-| `ALCHEMYAGENT_PSI_KEY` | Your own PageSpeed Insights quota |
+| Google OAuth client ID + secret (Desktop app), or a service account key file | Google Search Console (`gsc_*` tools, brand alerts for newly indexed pages) |
+| Bing Webmaster Tools API key | Bing Webmaster report |
+| Brave Search API key | Brave Search rankings |
+| Open PageRank API key | Link-authority scores |
+| OpenAlex API key | Your own research-citations quota |
+| PageSpeed Insights API key | Your own PageSpeed quota |
 
 ## Privacy
 
