@@ -205,6 +205,370 @@ function qualityMarkdown(rs, failed = []) {
   return L.join("\n").trimEnd();
 }
 
+// src/market.ts
+var ENGINES = ["google_ai_overview", "google_ai_mode", "chatgpt", "gemini", "perplexity", "claude"];
+var ENGINE_LABEL = { google_ai_overview: "Google AIO", google_ai_mode: "AI Mode", chatgpt: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", claude: "Claude" };
+var MODES = ["national", "local", "map_pack"];
+var host = (u) => (u || "").toLowerCase().split("//").pop().split("/")[0].replace(/^www\./, "");
+var squash = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+var sameSite = (h, d) => !!h && (h === d || h.endsWith("." + d));
+function profileErrors(p, need = []) {
+  const e = [];
+  if (!p.site) e.push("site is missing (the website, e.g. example.com).");
+  if (!p.brand_terms?.length) e.push("brand_terms is missing (how people and AI write the brand name).");
+  if (!p.topic_terms?.length) e.push('topic_terms is missing (what the business does, e.g. "industrial marketing"); it filters junk keywords.');
+  if (!p.competitors?.length) e.push("competitors is missing (1-5 competitor domains).");
+  else if (p.competitors.length > 5) e.push("competitors: keep it to the 5 that matter most.");
+  if (need.includes("rank")) {
+    if (!p.rank_tracking?.length) e.push("rank_tracking is missing: keyword groups, each with mode national, local or map_pack.");
+    (p.rank_tracking ?? []).forEach((g, i) => {
+      if (!MODES.includes(g.mode)) e.push(`rank_tracking group ${i + 1}: mode must be national, local or map_pack.`);
+      if (g.mode !== "national" && !g.location) e.push(`rank_tracking group ${i + 1} (${g.mode}): location is required, e.g. "Los Angeles,California,United States".`);
+      if (g.mode === "map_pack" && !g.business_name) e.push(`rank_tracking group ${i + 1} (map_pack): business_name is required (as on Google Business Profile).`);
+      if (!g.keywords?.length) e.push(`rank_tracking group ${i + 1}: keywords is empty.`);
+    });
+  }
+  if (need.includes("ai")) {
+    const ai = p.ai_tracking;
+    if (!ai?.clusters?.some((c) => c.prompts?.length)) e.push("ai_tracking.clusters needs at least one cluster with prompts.");
+    if (ai && ![25, 50, 100, "unlimited"].includes(ai.tier)) e.push("ai_tracking.tier must be 25, 50, 100 or unlimited.");
+    const n = (ai?.clusters ?? []).reduce((a, c) => a + (c.prompts?.length ?? 0), 0);
+    if (ai && typeof ai.tier === "number" && n > ai.tier) e.push(`${n} prompts is over the tier-${ai.tier} limit.`);
+    const bad = (ai?.engines ?? []).filter((x) => !ENGINES.includes(x));
+    if (bad.length) e.push(`ai_tracking.engines: unknown ${bad.join(", ")}.`);
+  }
+  return e;
+}
+var SETUP_HELP = `Set up tracking once (tracking_setup) and every AlchemyAgent app uses it:
+- site, brand_terms (how the brand is written), topic_terms (what the business does), competitors (1-5 domains)
+- rank_tracking: groups with mode national (country), local (organic from a city: location) or map_pack (Google Maps from a city: location + business_name)
+- ai_tracking: tier 25 | 50 | 100, cadence weekly | monthly, engines, clusters of prompts written the way buyers ask AI`;
+var CITED = /* @__PURE__ */ new Set(["references", "sources", "annotations", "citations"]);
+var SKIP_TEXT = /* @__PURE__ */ new Set([...CITED, "search_results", "fan_out_queries", "check_url", "url", "domain", "brand_entities"]);
+function summarizeAi(rows, engines, competitors, brands) {
+  const by_engine = {};
+  for (const e of engines) {
+    const rs = rows.map((r) => r.engines[e]).filter(Boolean);
+    by_engine[e] = { prompts: rs.length, answered: rs.filter((x) => x.answered).length, mentioned: rs.filter((x) => x.mentioned).length, cited: rs.filter((x) => x.cited).length };
+  }
+  const cells = rows.flatMap((r) => Object.values(r.engines));
+  const branded = (p) => brands.some((b) => squash(b) && squash(p).includes(squash(b)));
+  const sov = Object.fromEntries(["us", ...competitors].map((k) => [k, 0]));
+  for (const r of rows) if (!branded(r.prompt)) for (const x of Object.values(r.engines)) {
+    if (x.mentioned) sov.us++;
+    for (const d of x.competitors_mentioned) if (d in sov) sov[d]++;
+  }
+  const counts = /* @__PURE__ */ new Map();
+  for (const x of cells) for (const d of x.cited_domains) counts.set(d, (counts.get(d) ?? 0) + 1);
+  return {
+    cells: cells.length,
+    mentioned: cells.filter((x) => x.mentioned).length,
+    cited: cells.filter((x) => x.cited).length,
+    by_engine,
+    share_of_voice: sov,
+    top_cited: [...counts].sort((a, b) => b[1] - a[1]).slice(0, 12)
+  };
+}
+var pct = (a, b) => b ? `${Math.round(100 * a / b)}%` : "\u2013";
+function aiMarkdown(site, date, rows, s, engines, prev, tier) {
+  const sovTotal = Object.values(s.share_of_voice).reduce((a, b) => a + b, 0) || 1;
+  const L = [
+    `# AI visibility: ${site}`,
+    "",
+    `${date} \xB7 ${rows.length} prompts \xD7 ${engines.length} engines${tier ? ` \xB7 tier ${tier}` : ""}`,
+    "",
+    `**Mentioned in ${pct(s.mentioned, s.cells)} of AI answers, site cited in ${pct(s.cited, s.cells)}.**` + (prev ? ` Last run: ${pct(prev.mentioned, prev.cells)} / ${pct(prev.cited, prev.cells)}.` : ""),
+    "",
+    "| Engine | Mentioned | Cited | No AI answer |",
+    "|---|---:|---:|---:|",
+    ...Object.entries(s.by_engine).map(([e, v]) => `| ${ENGINE_LABEL[e]} | ${pct(v.mentioned, v.prompts)} | ${pct(v.cited, v.prompts)} | ${v.prompts - v.answered} |`),
+    "",
+    "**Share of voice** (unbranded prompts): " + Object.entries(s.share_of_voice).map(([k, v]) => `${k === "us" ? "you" : k} ${Math.round(100 * v / sovTotal)}%`).join(", "),
+    ""
+  ];
+  const clusters = /* @__PURE__ */ new Map();
+  for (const r of rows) clusters.set(r.cluster, [...clusters.get(r.cluster) ?? [], r]);
+  L.push("| Cluster | Prompts | Mentioned | Cited |", "|---|---:|---:|---:|");
+  for (const [name, rs] of clusters) {
+    const cells = rs.flatMap((r) => Object.values(r.engines));
+    L.push(`| ${name} | ${rs.length} | ${pct(cells.filter((x) => x.mentioned).length, cells.length)} | ${pct(cells.filter((x) => x.cited).length, cells.length)} |`);
+  }
+  const zero = rows.filter((r) => !Object.values(r.engines).some((x) => x.mentioned || x.cited)).map((r) => r.prompt);
+  if (zero.length) L.push("", `**${zero.length} prompts where no engine mentions or cites you** (content brief candidates):`, ...zero.slice(0, 10).map((p) => `- ${p}`));
+  L.push(
+    "",
+    "**Sites AI cites most:** " + s.top_cited.slice(0, 8).map(([d, n]) => `${d} (${n})`).join(", "),
+    "",
+    "| Prompt | " + engines.map((e) => ENGINE_LABEL[e]).join(" | ") + " |",
+    "|---|" + engines.map(() => "---|").join("")
+  );
+  const cell2 = (x) => !x ? "?" : !x.answered ? "\u2013" : (x.mentioned ? "M" : "") + (x.cited ? "C" : "") || "\xB7";
+  for (const r of rows) L.push(`| ${r.prompt.replace(/\|/g, "/")} | ` + engines.map((e) => cell2(r.engines[e])).join(" | ") + " |");
+  L.push("", "M = brand mentioned, C = site cited as a source, \u2013 = the engine showed no AI answer. Data: DataForSEO (Google SERP and AI Mode, ChatGPT and Gemini as users see them, Perplexity Sonar and Claude with web search).");
+  return L.join("\n");
+}
+function locationLabel(location) {
+  const city = (location || "").split(",")[0].trim();
+  return city.split(/\s+/).length > 1 ? city.split(/\s+/).map((w) => w[0]).join("").toUpperCase() : city;
+}
+function rankJobs(p) {
+  const jobs = [];
+  for (const g of p.rank_tracking ?? []) {
+    const tag2 = g.mode === "national" ? "" : g.mode === "local" ? ` (${locationLabel(g.location)})` : ` [map ${locationLabel(g.location)}]`;
+    for (const k of [...new Set(g.keywords)]) jobs.push({ label: k + tag2, keyword: k, mode: g.mode, location: g.location, business_name: g.business_name });
+  }
+  return jobs;
+}
+function rankMarkdown(site, date, rows, competitors, depth = 20, prev) {
+  const L = [`# Rankings: ${site}`, "", `${date} \xB7 ${rows.length} keywords`, ""];
+  for (const m of MODES) {
+    const rs = rows.filter((r) => r.mode === m);
+    if (!rs.length) continue;
+    const ranked = rs.filter((r) => r.position);
+    let line = `- **${m === "map_pack" ? "Map pack" : m[0].toUpperCase() + m.slice(1)}:** ranking for ${ranked.length} of ${rs.length} (top 3: ${ranked.filter((r) => r.position <= 3).length})`;
+    if (m !== "map_pack") {
+      const a = rs.filter((r) => r.ai_overview);
+      line += `; AI Overviews on ${a.length}, citing you on ${a.filter((r) => r.aio_cites_us).length}`;
+    }
+    L.push(line);
+  }
+  if (prev) {
+    const moved = rows.filter((r) => (prev[r.label] ?? null) !== r.position);
+    if (moved.length) L.push(`- Changed since last check: ${moved.slice(0, 8).map((r) => `${r.label} ${prev[r.label] ?? `>${depth}`} \u2192 ${r.position ?? `>${depth}`}`).join("; ")}`);
+  }
+  const ahead = competitors.map((c) => `${c} on ${rows.filter((r) => r.competitors[c] && (!r.position || r.competitors[c] < r.position)).length}`);
+  if (competitors.length) L.push(`- Competitors ahead of you: ${ahead.join(", ")}`);
+  L.push("", "| Keyword | Mode | You | AI Overview | Map pack | " + competitors.map((c) => c.split(".")[0]).join(" | ") + " |", "|---|---|---|---|---|" + competitors.map(() => "---|").join(""));
+  for (const r of rows) {
+    const aio = r.ai_overview ? r.aio_cites_us ? "cites you" : "yes" : "";
+    const pack = r.local_pack ? r.in_local_pack ? "in it" : "yes" : "";
+    L.push(`| ${r.label} | ${r.mode} | ${r.position ?? `>${depth}`} | ${aio} | ${pack} | ` + competitors.map((c) => r.competitors[c] ?? "").join(" | ") + " |");
+  }
+  L.push("", "Data: DataForSEO (Google organic, desktop; map pack from Google Maps).");
+  return L.join("\n");
+}
+function kwTable(rows, cols = [], limit = 30) {
+  const head = ["Keyword", "Volume/mo", "KD", "Intent", ...cols.map((c) => ({ position: "Your position", competitors: "Competitors on page one", cluster: "Cluster" })[c])];
+  const L = ["| " + head.join(" | ") + " |", "|" + head.map((_, i) => i === 1 || i === 2 ? "---:|" : "---|").join("")];
+  for (const r of rows.slice(0, limit)) {
+    const extra = cols.map((c) => c === "position" ? `#${r.position} ${r.url ? host(r.url) + new URL(r.url).pathname : ""}` : c === "competitors" ? Object.entries(r.competitors ?? {}).map(([d, v]) => `${d} #${v.position}`).join(", ") : r.cluster ?? "");
+    L.push(`| ${r.keyword} | ${r.volume.toLocaleString("en-US")} | ${r.kd ?? "?"} | ${r.intent ?? "?"} | ${extra.join(" | ")}${extra.length ? " |" : ""}`.replace(/\|  \|$/, "|"));
+  }
+  return L;
+}
+function droppedNote(d) {
+  const n = Object.values(d ?? {}).reduce((a, b) => a + b, 0);
+  if (!n) return "";
+  const names = { format: "malformed", language: "other language", navigational: "someone else's brand search", brand: "brand terms", noise: "noise terms", other_vertical: "other industries", other_location: "other cities/countries", off_topic: "off-topic" };
+  return `Filtered out ${n} junk keywords: ` + Object.entries(d).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${names[k] ?? k} ${v}`).join(", ") + ".";
+}
+var REVIEW = /(^|\.)(trustpilot\.com|clutch\.co|g2\.com|capterra\.com|designrush\.com|goodfirms\.co|bbb\.org|yelp\.com|glassdoor\.com|upcity\.com|sortlist\.com|techreviewer\.co|selectedfirms\.co|themanifest\.com)$/;
+var COMMUNITY = /(^|\.)(reddit\.com|quora\.com|youtube\.com|linkedin\.com|medium\.com|x\.com|twitter\.com|facebook\.com)$/;
+var targetType = (d) => REVIEW.test(d) ? "review/directory profile" : COMMUNITY.test(d) ? "community/video/social" : "article or list (pitch for inclusion)";
+function citationTargets(rows, domain, competitors, brands) {
+  const branded = (p) => brands.some((b) => squash(b) && squash(p).includes(squash(b)));
+  const agg = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    if (branded(r.prompt)) continue;
+    for (const [e, x] of Object.entries(r.engines)) {
+      if (!x || x.mentioned) continue;
+      for (const url of x.cited_urls ?? []) {
+        const h = host(url);
+        if (sameSite(h, domain) || competitors.some((c) => sameSite(h, c))) continue;
+        const t = agg.get(url) ?? { url, domain: h, n: 0, e: /* @__PURE__ */ new Set(), p: /* @__PURE__ */ new Set(), c: /* @__PURE__ */ new Set() };
+        t.n++;
+        t.e.add(ENGINE_LABEL[e]);
+        t.p.add(r.prompt);
+        t.c.add(r.cluster);
+        agg.set(url, t);
+      }
+    }
+  }
+  return [...agg.values()].sort((a, b) => b.n - a.n || b.p.size - a.p.size).map((t) => ({
+    url: t.url,
+    domain: t.domain,
+    type: targetType(t.domain),
+    times_cited: t.n,
+    engines: [...t.e].sort().join(", "),
+    clusters: [...t.c].sort().join(", "),
+    prompts: [...t.p].sort().join(" | ")
+  }));
+}
+var csvCell = (v) => {
+  const s = v === null || v === void 0 ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+var toCsv = (rows) => rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+function aiGridCsv(rows, engines) {
+  const out = [["cluster", "prompt", "engine", "ai_answer", "brand_mentioned", "site_cited", "competitors_mentioned", "competitors_cited", "cited_domains", "cited_urls"]];
+  const yn = (b) => b ? "yes" : "no";
+  for (const r of rows) for (const e of engines) {
+    const x = r.engines[e];
+    if (x) out.push([r.cluster, r.prompt, ENGINE_LABEL[e], yn(x.answered), yn(x.mentioned), yn(x.cited), x.competitors_mentioned.join(", "), x.competitors_cited.join(", "), x.cited_domains.join(", "), (x.cited_urls ?? []).join(" ")]);
+  }
+  return toCsv(out);
+}
+var targetsCsv = (t) => toCsv([["url", "domain", "type", "times_cited", "engines", "clusters", "prompts"], ...t.map((x) => [x.url, x.domain, x.type, x.times_cited, x.engines, x.clusters, x.prompts])]);
+var rankCsv = (rows, comps) => toCsv([
+  ["keyword", "mode", "your_position", "url", "ai_overview", "ai_overview_cites_you", "map_pack", "in_map_pack", ...comps],
+  ...rows.map((r) => [r.label, r.mode, r.position ?? "", r.url ?? "", r.ai_overview ? "yes" : "", r.aio_cites_us ? "yes" : "", r.local_pack ? "yes" : "", r.in_local_pack ? "yes" : "", ...comps.map((c) => r.competitors[c] ?? "")])
+]);
+var kwCsv = (rows) => toCsv([
+  ["cluster", "source", "keyword", "volume", "kd", "intent", "cpc", "position", "url", "competitors"],
+  ...rows.map((r) => [r.cluster ?? "", r.source ?? "", r.keyword, r.volume, r.kd ?? "", r.intent ?? "", r.cpc ?? "", r.position ?? "", r.url ?? "", Object.entries(r.competitors ?? {}).map(([d, v]) => `${d} #${v.position}`).join("; ")])
+]);
+
+// src/market-client.ts
+var MARKET_PRO_HELP = "AI visibility, rank tracking, keyword gaps, reach keywords and keyword research are part of AlchemyAgent Starter and Pro (Starter: 25 AI prompts monthly and 25 rank keywords; Pro: 50 prompts weekly, 100 keywords, gaps, reach, research and citation outreach). Add your license key in the AlchemyAgent settings (Claude Desktop: Settings > Extensions > AlchemyAgent > Configure; Claude Code: /plugin, then AlchemyAgent's settings). Get a plan: https://alchemyagent.ai/#pro";
+var ProApi = class {
+  constructor(f, base, key) {
+    this.f = f;
+    this.base = base;
+    this.key = key;
+  }
+  async call(path, body, method = body === void 0 ? "GET" : "POST") {
+    const r = await this.f(`${this.base}/api/pro/${path}`, { method, headers: { authorization: `Bearer ${this.key}`, "content-type": "application/json", "user-agent": "AlchemyAgent-MCP" }, body: body === void 0 ? void 0 : JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error?.message || `AlchemyAgent API error ${r.status}`);
+    return j;
+  }
+  profile = async () => (await this.call("profile")).profile;
+};
+var today = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+async function pool(items, n, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) {
+      const k = i++;
+      out[k] = await fn(items[k]);
+    }
+  }));
+  return out;
+}
+async function setupMarkdown(api, patch) {
+  if (patch && Object.keys(patch).length) {
+    const r = await api.call("profile", { profile: patch }, "PUT");
+    return [`# Tracking setup saved`, "", "```json", JSON.stringify(r.profile, null, 2), "```", ...r.warnings.length ? ["", "Still missing for some reports:", ...r.warnings.map((w) => `- ${w}`)] : ["", "Everything is set: ai_visibility, rank_tracking, keyword_gaps, reach_keywords and keyword_research can run."]].join("\n");
+  }
+  const p = await api.profile();
+  if (!p) return `# No tracking setup yet
+
+${SETUP_HELP}`;
+  const errs = profileErrors(p, ["rank", "ai"]);
+  return [`# Tracking setup: ${p.site}`, "", "```json", JSON.stringify(p, null, 2), "```", ...errs.length ? ["", "Missing:", ...errs.map((e) => `- ${e}`)] : []].join("\n");
+}
+async function runAiVisibility(api, o) {
+  const p = await api.profile();
+  const errs = p ? profileErrors(p, ["ai"]) : ["No tracking setup yet."];
+  if (errs.length) throw new Error("Set up AI tracking first (tracking_setup):\n- " + errs.join("\n- ") + "\n\n" + SETUP_HELP);
+  const engines = o.engines?.length ? o.engines : p.ai_tracking.engines?.length ? p.ai_tracking.engines : [...ENGINES];
+  let prompts = p.ai_tracking.clusters.flatMap((c) => (c.prompts ?? []).map((prompt) => ({ cluster: c.name, prompt })));
+  if (o.cluster) prompts = prompts.filter((x) => x.cluster.toLowerCase() === o.cluster.toLowerCase());
+  if (o.limit) prompts = prompts.slice(0, o.limit);
+  if (!prompts.length) throw new Error(`No prompts${o.cluster ? ` in cluster "${o.cluster}"` : ""}.`);
+  const batches = [];
+  for (let i = 0; i < prompts.length; i += 5) batches.push(prompts.slice(i, i + 5));
+  const prog = o.progress ?? { phase: "", done: 0, total: 0 };
+  Object.assign(prog, { phase: "asking AI engines", done: 0, total: prompts.length });
+  let cost = 0;
+  const rows = (await pool(batches, 2, async (b) => {
+    const r = await api.call("ai-visibility", { prompts: b, engines });
+    cost += r.cost;
+    prog.done += b.length;
+    return r.rows;
+  })).flat();
+  const brands = p.brand_terms, comps = p.competitors;
+  const s = summarizeAi(rows, engines, comps, brands);
+  const hist = (await api.call("history?kind=ai").catch(() => ({ history: [] }))).history;
+  const prev = hist.length ? hist[hist.length - 1].summary : null;
+  if (!o.cluster && !o.limit) await api.call("history", { kind: "ai", date: today(), summary: s }).catch(() => {
+  });
+  const targets = citationTargets(rows, p.site, comps, brands);
+  let md = aiMarkdown(p.site, today(), rows, s, engines, prev, p.ai_tracking.tier);
+  if (targets.length) md += "\n\n## Citation outreach\nPages AI cites where you're not mentioned (pitch for inclusion, claim or improve the profile, or join the thread):\n\n| Page | Type | Times cited | Engines |\n|---|---|---:|---|\n" + targets.slice(0, 20).map((t) => `| ${t.url} | ${t.type} | ${t.times_cited} | ${t.engines} |`).join("\n");
+  md += `
+
+Data cost this run: $${cost.toFixed(2)} (included in your plan).`;
+  const d = today();
+  return { markdown: md, exports: [{ name: `ai-visibility-${d}.csv`, csv: aiGridCsv(rows, engines) }, { name: `citation-targets-${d}.csv`, csv: targetsCsv(targets) }] };
+}
+async function runRanks(api, o = {}) {
+  const p = await api.profile();
+  const errs = p ? profileErrors(p, ["rank"]) : ["No tracking setup yet."];
+  if (errs.length) throw new Error("Set up rank tracking first (tracking_setup):\n- " + errs.join("\n- ") + "\n\n" + SETUP_HELP);
+  const jobs = rankJobs(p);
+  const batches = [];
+  for (let i = 0; i < jobs.length; i += 10) batches.push(jobs.slice(i, i + 10));
+  const prog = o.progress ?? { phase: "", done: 0, total: 0 };
+  Object.assign(prog, { phase: "checking rankings", done: 0, total: jobs.length });
+  const rows = (await pool(batches, 2, async (b) => {
+    const r = await api.call("rank", { jobs: b });
+    prog.done += b.length;
+    return r.rows;
+  })).flat();
+  const hist = (await api.call("history?kind=rank").catch(() => ({ history: [] }))).history;
+  await api.call("history", { kind: "rank", date: today(), summary: Object.fromEntries(rows.map((r) => [r.label, r.position])) }).catch(() => {
+  });
+  const comps = p.competitors;
+  return { markdown: rankMarkdown(p.site, today(), rows, comps, 20, hist.length ? hist[hist.length - 1].summary : null), exports: [{ name: `rankings-${today()}.csv`, csv: rankCsv(rows, comps) }] };
+}
+async function runGaps(api, o = {}) {
+  const r = await api.call("keyword-gaps", { competitors: o.competitors, top: o.top });
+  const md = [
+    `# Keyword gaps vs ${r.competitors.join(", ")}`,
+    "",
+    `You rank top 20 for ${r.ours} keywords. ${r.gaps.length} on-topic keywords where a competitor is on page one and you aren't in the top 20:`,
+    "",
+    ...kwTable(r.gaps, ["competitors"]),
+    "",
+    droppedNote(r.dropped),
+    "",
+    "Data: DataForSEO Labs (Google, country-level). Turn the best ones into page briefs."
+  ].join("\n");
+  return { markdown: md, exports: [{ name: `keyword-gaps-${today()}.csv`, csv: kwCsv(r.gaps) }] };
+}
+async function runReach(api, o = {}) {
+  const r = await api.call("reach", o);
+  const lo = o.min_pos ?? 50, hi = o.max_pos ?? 100;
+  const pages = /* @__PURE__ */ new Map();
+  for (const x of r.rows) if (x.url) pages.set(x.url, (pages.get(x.url) ?? 0) + 1);
+  const md = [
+    `# Reach keywords: positions ${lo}-${hi}`,
+    "",
+    `${r.rows.length} on-topic keywords you already rank ${lo}-${hi} for. Search Console barely shows these (too few impressions), but Google already considers the page. Easiest wins first:`,
+    "",
+    ...kwTable(r.rows, ["position"]),
+    "",
+    "**Pages holding the most:** " + [...pages].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([u, n]) => `${u} (${n})`).join(", "),
+    "",
+    droppedNote(r.dropped),
+    "",
+    "Next: expand or retarget the ranking page, or brief a dedicated page."
+  ].join("\n");
+  return { markdown: md, exports: [{ name: `reach-keywords-${today()}.csv`, csv: kwCsv(r.rows) }] };
+}
+async function runResearch(api, o) {
+  const r = await api.call("keyword-research", o);
+  const L = [`# Keyword research: ${Object.keys(o.clusters).length} clusters`, "", "| Cluster | Keywords | Volume/mo | Median KD | Biggest keyword |", "|---|---:|---:|---:|---|"];
+  for (const name of Object.keys(o.clusters)) {
+    const look = r.rows.filter((x) => x.cluster === name && x.source === "lookup");
+    const kd = look.map((x) => x.kd).filter((x) => x !== null).sort((a, b) => a - b);
+    const big = [...look].sort((a, b) => b.volume - a.volume)[0];
+    L.push(`| ${name} | ${look.length} | ${look.reduce((a, x) => a + x.volume, 0).toLocaleString("en-US")} | ${kd.length ? kd[Math.floor(kd.length / 2)] : "?"} | ${big ? `${big.keyword} (${big.volume.toLocaleString("en-US")})` : ""} |`);
+  }
+  const ideas = r.rows.filter((x) => x.source === "idea");
+  if (ideas.length) L.push("", `**${ideas.length} related searches** (longer searches containing your keywords):`, "", ...kwTable(ideas.sort((a, b) => b.volume - a.volume), ["cluster"], 25));
+  const noData = r.rows.filter((x) => x.no_data).map((x) => x.keyword);
+  if (noData.length) L.push("", `No search data for: ${noData.slice(0, 10).join(", ")} (too rare, too new, or phrased the way people ask AI assistants).`);
+  const flagged = r.rows.filter((x) => x.flag).map((x) => `${x.keyword} (${x.flag})`);
+  if (flagged.length) L.push("", `Check these, they look off-topic for this business: ${flagged.slice(0, 10).join(", ")}.`);
+  const note = droppedNote(r.dropped);
+  if (note) L.push("", note);
+  L.push("", "Data: DataForSEO Labs (Google Ads volumes, country-level).");
+  return { markdown: L.join("\n"), exports: [{ name: `keyword-research-${today()}.csv`, csv: kwCsv(r.rows) }] };
+}
+
 // src/links.ts
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -475,7 +839,7 @@ function zones(html) {
       spans.push([m.index, m.index + m[0].length, tag2 === "footer" ? "footer" : tag2 === "aside" ? "other" : "nav"]);
   return spans;
 }
-function extractLinks(pageUrl, html, host3) {
+function extractLinks(pageUrl, html, host4) {
   const clean2 = html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1>/gi, (m) => " ".repeat(m.length));
   const zs = zones(clean2);
   const out = [];
@@ -491,7 +855,7 @@ function extractLinks(pageUrl, html, host3) {
       continue;
     }
     abs.hash = "";
-    if (!/^https?:$/.test(abs.protocol) || abs.hostname.toLowerCase().replace(/^www\./, "") !== host3 || SKIP_PATH.test(abs.pathname)) continue;
+    if (!/^https?:$/.test(abs.protocol) || abs.hostname.toLowerCase().replace(/^www\./, "") !== host4 || SKIP_PATH.test(abs.pathname)) continue;
     let zone = "body";
     for (const [a, b, z] of zs) {
       if (a <= m.index && m.index < b) {
@@ -520,7 +884,7 @@ function paragraphs(html) {
   }
   return out;
 }
-async function pool(items, n, fn, onDone) {
+async function pool2(items, n, fn, onDone) {
   const out = new Array(items.length);
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
@@ -534,7 +898,7 @@ async function pool(items, n, fn, onDone) {
 }
 async function sitemapUrls(base, f, limit) {
   const origin = new URL(base).origin;
-  const host3 = new URL(base).hostname.replace(/^www\./, "");
+  const host4 = new URL(base).hostname.replace(/^www\./, "");
   const robots = await get(f, `${origin}/robots.txt`, LINKS_UA, 1e4);
   const listed = robots.status === 200 ? parseRobots(robots.text).sitemaps : [];
   const todo = listed.length ? [...listed] : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
@@ -557,7 +921,7 @@ async function sitemapUrls(base, f, limit) {
       } catch {
         continue;
       }
-      if (h !== host3 || seen.has(u) || /\.(jpe?g|png|webp|gif|pdf|xml)(\?|$)/i.test(u)) continue;
+      if (h !== host4 || seen.has(u) || /\.(jpe?g|png|webp|gif|pdf|xml)(\?|$)/i.test(u)) continue;
       seen.add(u);
       urls.push(u);
       if (urls.length >= limit) break;
@@ -566,9 +930,9 @@ async function sitemapUrls(base, f, limit) {
   return urls;
 }
 var isChallenge = (status, headers, body) => headers.get("cf-mitigated") === "challenge" || (status === 403 || status === 503) && /Just a moment|cf-chl|captcha|challenge-platform/i.test(body.slice(0, 5e3));
-async function crawl(urls, f, host3, onDone) {
+async function crawl(urls, f, host4, onDone) {
   const out = {};
-  const rows = await pool(urls, 6, async (u) => {
+  const rows = await pool2(urls, 6, async (u) => {
     const r = await get(f, u, LINKS_UA, 2e4);
     if (r.status === 0) return [u, { status: 0 }];
     if (isChallenge(r.status, r.headers, r.text)) return [u, { status: r.status, challenged: true }];
@@ -580,7 +944,7 @@ async function crawl(urls, f, host3, onDone) {
       title: text(t.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").slice(0, 160),
       h1: text(t.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "").slice(0, 160),
       noindex: /<meta[^>]+name=["']robots["'][^>]+noindex/i.test(t),
-      links: extractLinks(r.url, t, host3),
+      links: extractLinks(r.url, t, host4),
       text: bodyText(t).slice(0, 4e4),
       paras: paragraphs(t)
     }];
@@ -590,7 +954,7 @@ async function crawl(urls, f, host3, onDone) {
 }
 async function resolveTargets(targets, f, onDone) {
   const out = {};
-  const rows = await pool(Object.entries(targets), 6, async ([u, raw]) => {
+  const rows = await pool2(Object.entries(targets), 6, async ([u, raw]) => {
     let cur = raw.split("?")[0], hops = 0;
     while (hops < 6) {
       const ctl = new AbortController();
@@ -805,13 +1169,13 @@ function buildPlan(pages, resolved, gsc, base, o) {
   };
 }
 async function runLinks(o) {
-  const host3 = new URL(o.base).hostname.toLowerCase().replace(/^www\./, "");
+  const host4 = new URL(o.base).hostname.toLowerCase().replace(/^www\./, "");
   const prog = o.progress ?? { phase: "", done: 0, total: 0 };
   Object.assign(prog, { phase: "reading sitemaps", done: 0, total: 0 });
   const urls = await sitemapUrls(o.base, o.f, o.maxPages);
   if (!urls.length) throw new Error(`No sitemap URLs found for ${o.base} (checked robots.txt Sitemap lines and /sitemap.xml). The crawl starts from the sitemap, so publish one first.`);
   Object.assign(prog, { phase: "crawling pages", done: 0, total: urls.length });
-  const pages = await crawl(urls, o.f, host3, () => prog.done++);
+  const pages = await crawl(urls, o.f, host4, () => prog.done++);
   const blocked = Object.values(pages).filter((p) => p.challenged).length;
   const known = new Set(Object.keys(pages));
   const targets = {};
@@ -822,16 +1186,16 @@ async function runLinks(o) {
   const plan = buildPlan(pages, resolved, o.gsc ?? { pages: {}, pq: [] }, o.base, o.plan);
   return { site: norm(o.base), date: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), range: [o.plan.posMin, o.plan.posMax], gscProperty: o.gsc ? o.gscProperty : void 0, crawled: Object.keys(pages).length, blocked, sitemapUrls: urls.length, plan };
 }
-var csvCell = (v) => {
+var csvCell2 = (v) => {
   const s = String(v ?? "");
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
-var csv = (rows) => rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+var csv = (rows) => rows.map((r) => r.map(csvCell2).join(",")).join("\n") + "\n";
 async function saveLinkFiles(r, md, outDir) {
-  const host3 = new URL(r.site).hostname;
+  const host4 = new URL(r.site).hostname;
   const dir = resolvePath((outDir ?? join(homedir(), "Downloads", "alchemyagent-reports")).replace(/^~(?=\/)/, homedir()));
   await mkdir(dir, { recursive: true });
-  const stem = join(dir, `internal-links-${host3}-${r.date}`);
+  const stem = join(dir, `internal-links-${host4}-${r.date}`);
   const p = r.plan;
   const fields = ["target", "target_position", "target_impressions", "target_clicks", "donor", "donor_position", "similarity", "donor_authority", "anchor", "place_near", "target_authority_before", "target_authority_after"];
   const cleanup = [["type", "page", "href_or_to", "detail", "anchor", "zone"]];
@@ -2011,7 +2375,7 @@ function communityMarkdown(r, limit = 10) {
 // src/brave.ts
 var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
 var BRAVE_KEY_HELP = "Brave Search rankings need your own Brave Search API key. Sign up at https://api-dashboard.search.brave.com (the free plan covers a few thousand queries a month), create a key, then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The key stays on your computer and is only sent to Brave.";
-var host = (u) => {
+var host2 = (u) => {
   try {
     return new URL(u).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
@@ -2032,14 +2396,14 @@ async function braveRank(f, key, domain, queries, country = "US", pause = 1100) 
       if (!r.ok) throw new Error(`Brave Search returned HTTP ${r.status}`);
       const results = body?.web?.results ?? [];
       const idx = results.findIndex((x) => {
-        const h = host(x.url);
+        const h = host2(x.url);
         return h === want || h.endsWith("." + want);
       });
       out.push({
         query: q,
         position: idx >= 0 ? idx + 1 : null,
         url: idx >= 0 ? results[idx].url : void 0,
-        top: results.slice(0, 3).map((x, j) => ({ position: j + 1, host: host(x.url), title: String(x.title ?? "").replace(/<[^>]+>/g, "") })),
+        top: results.slice(0, 3).map((x, j) => ({ position: j + 1, host: host2(x.url), title: String(x.title ?? "").replace(/<[^>]+>/g, "") })),
         discussions: !!body?.discussions?.results?.length
       });
     } catch (e) {
@@ -2408,6 +2772,38 @@ function registerPrompts(server2, remote) {
         "Don't change anything on the site. Point me to the CSV files for the full lists."
       ].join("\n"))
     );
+    server2.registerPrompt(
+      "setup_tracking",
+      {
+        title: "Set up AI visibility and rank tracking",
+        description: "One-time setup shared by every AlchemyAgent app: brand, topics, competitors, rank tracking modes (national, local, map pack) and AI prompt clusters.",
+        argsSchema: { site: external_exports.string().describe("Website, e.g. example.com") }
+      },
+      ({ site }) => msg([
+        `Help me set up AlchemyAgent tracking for ${site}. Ask me one group of questions at a time and save with tracking_setup after each answer.`,
+        "",
+        "1. Brand: how do people and AI write our name (all spellings)? What do we do (topic_terms: services/products in our words)? Which cities or regions do we serve?",
+        "2. Competitors: who do we actually lose deals to (1-8 domains)? Suggest the domains that hold page one for our money keywords, but I decide.",
+        "3. Rank tracking: for each group of keywords, national (whole country), local (organic results from a city) or map pack (our Google Maps listing from a city: I'll give the Google Business Profile name)? Suggest money terms plus a few we already rank for (gsc_performance if Search Console is connected).",
+        "4. AI tracking: which plan tier (25, 50 or 100 prompts) and weekly or monthly? Draft prompts the way buyers ask AI (full questions: category + use case + segment), grouped into clusters by buying stage (brand, best-of/vendor choice, cost, how-to, comparisons). Show me the list before saving.",
+        "Finish with plan_usage and a one-line summary of what will run."
+      ].join("\n"))
+    );
+    server2.registerPrompt(
+      "ai_visibility_report",
+      {
+        title: "AI visibility report",
+        description: "Run the AI prompt tracker and get a ranked plan: where you're invisible, who AI cites instead, and the outreach list.",
+        argsSchema: {}
+      },
+      () => msg([
+        "Run ai_visibility (call it again while it says it's still running). Then give me:",
+        "- A 3-line summary: mention and citation rates, the best and worst engine, change since last run.",
+        "- The clusters where we're invisible, and the top 5 zero-presence prompts with the page we should create or improve for each.",
+        "- Who AI cites instead, and the citation outreach list grouped by type: articles/lists to pitch for inclusion, review/directory profiles to claim or improve, community threads/videos to join. For the top 5 articles, draft a 2-sentence pitch.",
+        "- Point me to the spreadsheets."
+      ].join("\n"))
+    );
   }
 }
 
@@ -2423,7 +2819,7 @@ var hash = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
 var decode3 = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/<[^>]+>/g, "").trim();
 var tag = (xml, name) => xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, "i"))?.[1] ?? "";
 var slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "brand";
-var host2 = (u) => {
+var host3 = (u) => {
   try {
     return new URL(u).hostname.replace(/^www\./, "");
   } catch {
@@ -2448,7 +2844,7 @@ function parseGoogleNews(xml) {
     const outlet = decode3(tag(it, "source"));
     const title = decode3(tag(it, "title")).replace(new RegExp(`\\s+-\\s+${outlet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "");
     const d = Date.parse(decode3(tag(it, "pubDate")));
-    return { source: "Google News", title, url: decode3(tag(it, "link")), outlet: outlet || host2(it.match(/<source[^>]*url="([^"]+)"/i)?.[1] ?? ""), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
+    return { source: "Google News", title, url: decode3(tag(it, "link")), outlet: outlet || host3(it.match(/<source[^>]*url="([^"]+)"/i)?.[1] ?? ""), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
   });
 }
 function parseGoogleAlerts(xml) {
@@ -2461,13 +2857,13 @@ function parseGoogleAlerts(xml) {
     } catch {
     }
     const d = Date.parse(decode3(tag(e, "published")) || decode3(tag(e, "updated")));
-    return { source: "Google Alerts", title: decode3(tag(e, "title")), url, outlet: host2(url), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
+    return { source: "Google Alerts", title: decode3(tag(e, "title")), url, outlet: host3(url), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
   });
 }
 async function linksTo(f, url, domain) {
   if (/^https:\/\/news\.google\.com\//.test(url)) return null;
   const r = await getText2(f, url, 1e4);
-  if (r.status !== 200 || !r.text || host2(r.url) === "news.google.com") return null;
+  if (r.status !== 200 || !r.text || host3(r.url) === "news.google.com") return null;
   const d = domain.replace(/^www\./, "").replace(/\./g, "\\.");
   return new RegExp(`href=["'][^"']*\\/\\/(www\\.)?${d}`, "i").test(r.text);
 }
@@ -2510,7 +2906,7 @@ async function checkAlerts(opts, f = fetch) {
       const pages = await opts.pagesPickedUp();
       if (pages) {
         checked.push("Search Console (new pages)");
-        found.push(...pages.map((p) => ({ source: "Search Console", title: `Started getting Google impressions (${p.impressions} so far)`, url: p.url, outlet: host2(p.url), date: p.first, kind: "page", id: hash("page:" + p.url) })));
+        found.push(...pages.map((p) => ({ source: "Search Console", title: `Started getting Google impressions (${p.impressions} so far)`, url: p.url, outlet: host3(p.url), date: p.first, kind: "page", id: hash("page:" + p.url) })));
       }
     } catch (e) {
       errors.push(`Search Console: ${e instanceof Error ? e.message.split(".")[0] : String(e)}`);
@@ -2519,7 +2915,7 @@ async function checkAlerts(opts, f = fetch) {
   const fresh = [];
   const ids = /* @__PURE__ */ new Set();
   for (const it of found) {
-    if (it.kind === "press" && domain && host2(it.url).endsWith(domain)) continue;
+    if (it.kind === "press" && domain && host3(it.url).endsWith(domain)) continue;
     if (ids.has(it.id) || state.seen[it.id]) continue;
     ids.add(it.id);
     fresh.push(it);
@@ -2596,7 +2992,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.11";
+var VERSION = "0.4.0";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer(opts = {}) {
@@ -2790,10 +3186,10 @@ function createServer(opts = {}) {
       annotations: ro
     },
     async ({ url }) => run(async () => {
-      const host3 = new URL(normalizeUrl(url)).hostname;
-      const wd = await api(`/api/wikidata?${new URLSearchParams({ domain: host3 })}`).catch(() => null);
+      const host4 = new URL(normalizeUrl(url)).hostname;
+      const wd = await api(`/api/wikidata?${new URLSearchParams({ domain: host4 })}`).catch(() => null);
       const article = wd?.matchedBy === "official website" ? wd.entities?.[0]?.wikipedia : void 0;
-      return wikipediaMarkdown(await wikipediaCheck(host3, article, f));
+      return wikipediaMarkdown(await wikipediaCheck(host4, article, f));
     })
   );
   register(
@@ -2821,9 +3217,9 @@ function createServer(opts = {}) {
       async ({ url, include }) => {
         try {
           const target = normalizeUrl(url);
-          const host3 = new URL(target).hostname.replace(/^www\./, "");
+          const host4 = new URL(target).hostname.replace(/^www\./, "");
           const [robots, page] = await Promise.all([
-            include === "page" ? Promise.resolve(null) : robotsHistory(host3, f),
+            include === "page" ? Promise.resolve(null) : robotsHistory(host4, f),
             include === "robots" ? Promise.resolve(null) : pageHistory(target, f)
           ]);
           return { content: [{ type: "text", text: waybackMarkdown(robots, page) }] };
@@ -2899,8 +3295,8 @@ function createServer(opts = {}) {
       },
       async ({ url, queries, country }) => run(async () => {
         if (!opts.braveKey) throw new Error(BRAVE_KEY_HELP);
-        const host3 = new URL(normalizeUrl(url)).hostname;
-        return braveMarkdown(host3, await braveRank(f, opts.braveKey, host3, queries, country.toUpperCase()), country.toUpperCase());
+        const host4 = new URL(normalizeUrl(url)).hostname;
+        return braveMarkdown(host4, await braveRank(f, opts.braveKey, host4, queries, country.toUpperCase()), country.toUpperCase());
       })
     );
     register(
@@ -3256,7 +3652,7 @@ ${md}`;
               if (!/isn't a Search Console property|sign in|connect/i.test(String(e))) throw e;
             }
           }
-          const host3 = new URL(base).hostname.replace(/^www\./, "");
+          const host4 = new URL(base).hostname.replace(/^www\./, "");
           const progress = { phase: "starting", done: 0, total: 0 };
           const j = { started: Date.now(), progress, promise: Promise.resolve(null) };
           j.promise = runLinks({
@@ -3266,7 +3662,7 @@ ${md}`;
             gsc,
             gscProperty,
             progress,
-            plan: { posMin: a.position_min, posMax: a.position_max, minImpressions: a.min_impressions, donorsPer: a.donors_per_page, brand: a.brand_terms?.length ? a.brand_terms : [host3.split(".")[0]] }
+            plan: { posMin: a.position_min, posMax: a.position_max, minImpressions: a.min_impressions, donorsPer: a.donors_per_page, brand: a.brand_terms?.length ? a.brand_terms : [host4.split(".")[0]] }
           }).then(async (r) => {
             const md0 = linksMarkdown(r);
             r.files = await saveLinkFiles(r, md0, a.out_dir).catch(() => void 0);
@@ -3290,6 +3686,157 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
         if (job.md) return job.md;
         const pr = job.progress;
         return `Still running (${Math.round((Date.now() - job.started) / 1e3)} s so far): ${pr.phase}${pr.total ? ` ${pr.done} of ${pr.total}` : ""}. Call internal_links again with the same site in about a minute to get the plan.`;
+      })
+    );
+    const pro = () => {
+      if (!opts.licenseKey) throw new Error(MARKET_PRO_HELP);
+      return new ProApi(f, apiBase, opts.licenseKey);
+    };
+    const saveExports = async (r, outDir) => {
+      const { mkdir: mkdir3, writeFile: writeFile3 } = await import("node:fs/promises");
+      const { homedir: homedir3 } = await import("node:os");
+      const { join: join3, resolve } = await import("node:path");
+      const dir = resolve((outDir ?? join3(homedir3(), "Downloads", "alchemyagent-reports")).replace(/^~(?=\/)/, homedir3()));
+      await mkdir3(dir, { recursive: true });
+      const paths = [];
+      for (const x of r.exports) {
+        const pth = join3(dir, x.name);
+        await writeFile3(pth, x.csv);
+        paths.push(pth);
+      }
+      return r.markdown + "\n\n**Spreadsheets** (open in Excel or Google Sheets):\n" + paths.map((x) => `- ${x}`).join("\n");
+    };
+    const marketJobs = /* @__PURE__ */ new Map();
+    const asJob = async (key, refresh, start) => {
+      let job = marketJobs.get(key);
+      if (!job || job.error || refresh && job.md || job.md && Date.now() - job.started > 6 * 36e5) {
+        const progress = { phase: "starting", done: 0, total: 0 };
+        const j = { started: Date.now(), progress, promise: Promise.resolve("") };
+        j.promise = start(progress).then((md) => j.md = md, (e) => {
+          j.error = e instanceof Error ? e.message : String(e);
+          throw e;
+        });
+        j.promise.catch(() => {
+        });
+        marketJobs.set(key, j);
+        job = j;
+      }
+      await Promise.race([job.promise.catch(() => {
+      }), new Promise((r) => setTimeout(r, 4e4))]);
+      if (job.error) throw new Error(job.error);
+      if (job.md) return job.md;
+      return `Still running (${Math.round((Date.now() - job.started) / 1e3)} s): ${job.progress.phase}${job.progress.total ? ` ${job.progress.done} of ${job.progress.total}` : ""}. Call the tool again with the same inputs in about a minute to get the report.`;
+    };
+    const strList = external_exports.array(external_exports.string());
+    register(
+      "tracking_setup",
+      {
+        title: "Tracking setup (AI visibility and rankings)",
+        description: "Show or save the account's tracking setup, shared by every AlchemyAgent app (Claude, ChatGPT, WordPress, Slack): site, brand_terms, topic_terms (what the business does; filters junk keywords), competitors (1-8 domains), rank_tracking groups (mode national, local with location, or map_pack with location + business_name) and ai_tracking (tier 25/50/100, cadence weekly/monthly, engines, clusters of prompts). Call with no fields to show it. Fields you pass are merged into the saved setup. Ask the user for modes and competitors; don't guess them.",
+        inputSchema: {
+          site: external_exports.string().optional(),
+          brand_terms: strList.optional(),
+          topic_terms: strList.optional(),
+          competitors: strList.optional(),
+          competitor_names: external_exports.record(external_exports.string(), strList).optional(),
+          service_areas: strList.optional(),
+          rank_tracking: external_exports.array(external_exports.object({ mode: external_exports.enum(MODES), keywords: strList, location: external_exports.string().optional(), business_name: external_exports.string().optional() })).optional(),
+          ai_tracking: external_exports.object({
+            tier: external_exports.union([external_exports.literal(25), external_exports.literal(50), external_exports.literal(100), external_exports.literal("unlimited")]),
+            cadence: external_exports.enum(["weekly", "monthly"]).optional(),
+            engines: external_exports.array(external_exports.enum(ENGINES)).optional(),
+            clusters: external_exports.array(external_exports.object({ name: external_exports.string(), prompts: strList }))
+          }).optional(),
+          location_code: external_exports.number().int().optional().describe("Country (DataForSEO location code; US 2840)"),
+          language_code: external_exports.string().optional()
+        },
+        annotations: { readOnlyHint: false, openWorldHint: true }
+      },
+      async (a) => run(async () => setupMarkdown(pro(), Object.fromEntries(Object.entries(a).filter(([, v]) => v !== void 0))))
+    );
+    register(
+      "ai_visibility",
+      {
+        title: "AI visibility tracker (Starter/Pro)",
+        description: "Run the account's AI prompt clusters through Google AI Overviews, Google AI Mode, ChatGPT, Gemini, Perplexity and Claude, and report per prompt and engine whether the brand is mentioned, whether its site is cited as a source, competitor share of voice (unbranded prompts), the sites AI cites instead, zero-presence prompts, change since the last run, and citation outreach targets (pages AI cites where the brand is missing). Writes spreadsheets. Prompts come from tracking_setup. A full run takes a few minutes: if it says it's still running, call it again with the same inputs.",
+        inputSchema: {
+          cluster: external_exports.string().optional().describe("Only this cluster"),
+          engines: external_exports.array(external_exports.enum(ENGINES)).optional(),
+          limit: external_exports.number().int().min(1).optional().describe("Only the first N prompts (quick test)"),
+          refresh: external_exports.boolean().default(false),
+          out_dir: external_exports.string().optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async (a) => run(async () => asJob(`ai:${a.cluster ?? ""}:${(a.engines ?? []).join(",")}:${a.limit ?? ""}`, a.refresh, async (progress) => saveExports(await runAiVisibility(pro(), { ...a, progress }), a.out_dir)))
+    );
+    register(
+      "rank_tracking",
+      {
+        title: "Rank tracking: national, local, map pack (Starter/Pro)",
+        description: "Check Google positions for the account's tracked keyword groups (tracking_setup): national (country), local (organic from a city) and map pack (Google Maps listing from a city), with whether an AI Overview shows and cites the site, each competitor's position, and change since the last check. Writes a spreadsheet. If it says it's still running, call it again.",
+        inputSchema: { refresh: external_exports.boolean().default(false), out_dir: external_exports.string().optional() },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async (a) => run(async () => asJob("rank", a.refresh, async (progress) => saveExports(await runRanks(pro(), { progress }), a.out_dir)))
+    );
+    register(
+      "keyword_gaps",
+      {
+        title: "Keyword gaps vs competitors (Pro)",
+        description: "Keywords where the account's competitors rank on page one and the site isn't in the top 20, filtered to on-topic keywords for this business (other industries, cities, brands and languages removed), with volume, difficulty and intent. Writes a spreadsheet.",
+        inputSchema: { competitors: strList.optional().describe("Override the saved competitors (up to 3 compared)"), top: external_exports.number().int().min(5).max(200).default(50), out_dir: external_exports.string().optional() },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async (a) => run(async () => saveExports(await runGaps(pro(), a), a.out_dir))
+    );
+    register(
+      "reach_keywords",
+      {
+        title: "Reach keywords: positions 50-100 (Pro)",
+        description: "On-topic keywords the site already ranks 50-100 for, where Search Console shows almost nothing but Google already considers the page; easiest wins first, with the ranking page. Writes a spreadsheet.",
+        inputSchema: { min_pos: external_exports.number().int().min(11).max(99).default(50), max_pos: external_exports.number().int().min(20).max(100).default(100), top: external_exports.number().int().min(5).max(200).default(60), out_dir: external_exports.string().optional() },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async (a) => run(async () => saveExports(await runReach(pro(), a), a.out_dir))
+    );
+    register(
+      "keyword_research",
+      {
+        title: "Keyword research in batches (Pro)",
+        description: "Look up many keywords and whole keyword clusters at once: search volume, difficulty, intent and CPC for every keyword in one call, per-cluster totals, and optionally longer searches that contain them (junk filtered). Put the whole request in one call, never one call per keyword. Writes a spreadsheet.",
+        inputSchema: {
+          clusters: external_exports.record(external_exports.string(), strList).describe('{"Cluster name": ["keyword", ...]}; use {"Lookup": [...]} for a plain list'),
+          expand: external_exports.boolean().default(false).describe("Also find longer searches containing each cluster's top keywords"),
+          ideas: external_exports.number().int().min(10).max(200).default(100),
+          min_volume: external_exports.number().int().min(0).default(10),
+          out_dir: external_exports.string().optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async (a) => run(async () => saveExports(await runResearch(pro(), a), a.out_dir))
+    );
+    register(
+      "plan_usage",
+      {
+        title: "AlchemyAgent plan and usage",
+        description: "Show the account's plan, this month's usage of AI visibility checks, rank checks and keyword data calls, and the limits.",
+        inputSchema: {},
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async () => run(async () => {
+        const u = await pro().call("usage");
+        return [
+          `# ${u.limits.label} plan \xB7 ${u.month}`,
+          "",
+          "| | Used | Included |",
+          "|---|---:|---:|",
+          `| AI visibility checks (prompt \xD7 engine) | ${u.used.ai_checks} | ${u.limits.ai_checks} |`,
+          `| Rank checks | ${u.used.rank_checks} | ${u.limits.rank_checks} |`,
+          `| Keyword data calls | ${u.used.labs_calls} | ${u.limits.labs_calls} |`,
+          "",
+          `AI visibility tier: up to ${u.limits.ai_tier ?? "unlimited"} prompts.`
+        ].join("\n");
       })
     );
     register(
