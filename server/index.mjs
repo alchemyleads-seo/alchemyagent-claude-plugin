@@ -159,11 +159,22 @@ var StdioServerTransport = class {
 
 // src/quality.ts
 var PRO_HELP = "Page quality rating is part of AlchemyAgent Pro: each page is rated 1 to 9 against our private rubric (built from the concepts in Google's public Search Quality Rater Guidelines), with quoted evidence and a specific fix. Add your Pro license key in the AlchemyAgent settings (Claude Desktop: Settings > Extensions > AlchemyAgent > Configure; Claude Code: /plugin, then AlchemyAgent's settings). Get Pro: https://alchemyagent.ai/#pro";
+async function fetchPage(f, url) {
+  try {
+    const r = await f(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)", accept: "text/html,application/xhtml+xml" }, redirect: "follow" });
+    const t = await r.text();
+    if (!r.ok || /cf-chl|challenge-platform|Just a moment\.\.\./i.test(t.slice(0, 5e3))) return void 0;
+    return t;
+  } catch {
+    return void 0;
+  }
+}
 async function rateQuality(f, apiBase, licenseKey, url, context) {
+  const html = await fetchPage(f, url);
   const r = await f(`${apiBase}/api/quality`, {
     method: "POST",
     headers: { authorization: `Bearer ${licenseKey}`, "content-type": "application/json", "user-agent": "AlchemyAgent-MCP" },
-    body: JSON.stringify({ url, context })
+    body: JSON.stringify({ url, context, html })
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error?.message || `Page quality service error ${r.status}`);
@@ -2095,7 +2106,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.9";
+var VERSION = "0.3.10";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer(opts = {}) {
