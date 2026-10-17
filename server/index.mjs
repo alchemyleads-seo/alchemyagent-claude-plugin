@@ -217,8 +217,8 @@ function profileErrors(p, need = []) {
   if (!p.site) e.push("site is missing (the website, e.g. example.com).");
   if (!p.brand_terms?.length) e.push("brand_terms is missing (how people and AI write the brand name).");
   if (!p.topic_terms?.length) e.push('topic_terms is missing (what the business does, e.g. "industrial marketing"); it filters junk keywords.');
-  if (!p.competitors?.length) e.push("competitors is missing (1-5 competitor domains).");
-  else if (p.competitors.length > 5) e.push("competitors: keep it to the 5 that matter most.");
+  if (!p.competitors?.length) e.push("competitors is missing (1-8 competitor domains).");
+  else if (p.competitors.length > 8) e.push("competitors: keep it to the 8 that matter most.");
   if (need.includes("rank")) {
     if (!p.rank_tracking?.length) e.push("rank_tracking is missing: keyword groups, each with mode national, local or map_pack.");
     (p.rank_tracking ?? []).forEach((g, i) => {
@@ -2992,7 +2992,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.4.0";
+var VERSION = "0.4.1";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer(opts = {}) {

@@ -1,6 +1,6 @@
 {
   "name": "alchemyagent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "AI search toolkit for Claude Code: AI crawler access, what AI sees on a page, llms.txt and agent readiness, brand presence (Wikidata, Wikipedia, news, research, communities), speed, schema, Bing, Brave and your own Search Console. Plus skills for audits, llms.txt and robots.txt AI policy.",
   "author": {
     "name": "AlchemyLeads",
