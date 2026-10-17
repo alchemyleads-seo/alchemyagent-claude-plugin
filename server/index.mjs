@@ -2597,7 +2597,7 @@ var REPORT_RULES = [
   "- Quote the evidence for each fix from the tool results (numbers, URLs). Don't invent data; if a tool failed or was blocked, say so and move on.",
   "- Keep it plain English for a marketing lead. No filler."
 ].join("\n");
-function registerPrompts(server2, remote) {
+function registerPrompts(server2, remote, pro = !remote) {
   const local = (tools) => remote ? "" : tools;
   server2.registerPrompt(
     "ai_search_audit",
@@ -2772,6 +2772,8 @@ function registerPrompts(server2, remote) {
         "Don't change anything on the site. Point me to the CSV files for the full lists."
       ].join("\n"))
     );
+  }
+  if (pro) {
     server2.registerPrompt(
       "setup_tracking",
       {
@@ -2992,7 +2994,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.4.1";
+var VERSION = "0.5.0";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer(opts = {}) {
@@ -3688,11 +3690,44 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
         return `Still running (${Math.round((Date.now() - job.started) / 1e3)} s so far): ${pr.phase}${pr.total ? ` ${pr.done} of ${pr.total}` : ""}. Call internal_links again with the same site in about a minute to get the plan.`;
       })
     );
+    register(
+      "bing_webmaster",
+      {
+        title: "Bing Webmaster Tools report",
+        description: "Read the user's own Bing Webmaster Tools data with their API key: Bing clicks and impressions (last 28 days vs the previous 28), top queries, top pages, pages in Bing's index, crawl errors and URL submission quota. Call without site_url to list the sites in the account. Uses the Bing Webmaster API (https://learn.microsoft.com/en-us/bingwebmaster/getting-access).",
+        inputSchema: {
+          site_url: external_exports.string().optional().describe("A site in the user's Bing Webmaster Tools account, e.g. https://example.com/ or example.com. Omit to list sites."),
+          report: external_exports.enum(["overview", "queries", "pages", "crawl"]).default("overview").describe("overview: traffic, top 10 queries and crawl; or one section in more depth"),
+          limit: external_exports.number().int().min(1).max(100).default(15).describe("Rows for query/page tables")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async ({ site_url, report, limit }) => {
+        try {
+          if (!opts.bingKey) throw new Error(BING_KEY_HELP);
+          const sites = await listSites2(f, opts.bingKey);
+          if (!site_url) return { content: [{ type: "text", text: sitesMarkdown(sites) }] };
+          const site = matchSite(sites, site_url);
+          if (!site) throw new Error(`${site_url} isn't in this Bing Webmaster Tools account. ${sites.length ? "Sites in the account: " + sites.map((s) => s.url).join(", ") : "Add and verify it at https://www.bing.com/webmasters first."}`);
+          const sections = report === "overview" ? ["traffic", "queries", "crawl"] : [report];
+          const data = await bingReport(f, opts.bingKey, site.url, sections);
+          return { content: [{ type: "text", text: bingMarkdown(data, report === "overview" ? Math.min(limit, 10) : limit) }] };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
+    );
+  }
+  if (!opts.remote || opts.proHosted) {
     const pro = () => {
       if (!opts.licenseKey) throw new Error(MARKET_PRO_HELP);
       return new ProApi(f, apiBase, opts.licenseKey);
     };
     const saveExports = async (r, outDir) => {
+      if (opts.proHosted) {
+        const links = await opts.proHosted.saveExports(r.exports);
+        return r.markdown + "\n\n**Spreadsheets:** " + Object.entries(links).map(([n, u]) => `[${n}](${u})`).join(" \xB7 ");
+      }
       const { mkdir: mkdir3, writeFile: writeFile3 } = await import("node:fs/promises");
       const { homedir: homedir3 } = await import("node:os");
       const { join: join3, resolve } = await import("node:path");
@@ -3707,7 +3742,16 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
       return r.markdown + "\n\n**Spreadsheets** (open in Excel or Google Sheets):\n" + paths.map((x) => `- ${x}`).join("\n");
     };
     const marketJobs = /* @__PURE__ */ new Map();
-    const asJob = async (key, refresh, start) => {
+    const asJob = async (key, refresh, start, hostedKind) => {
+      if (opts.proHosted && hostedKind) {
+        await pro().call("report/run", { kind: hostedKind });
+        const last = await pro().call(`report?kind=${hostedKind}`).catch(() => null);
+        return `A full ${hostedKind === "ai" ? "AI visibility" : "rankings"} run is queued and will be ready within the hour (ask for latest_report then).` + (last?.report ? `
+
+Meanwhile, the last report from ${last.report.date}:
+
+${last.report.markdown}` : "");
+      }
       let job = marketJobs.get(key);
       if (!job || job.error || refresh && job.md || job.md && Date.now() - job.started > 6 * 36e5) {
         const progress = { phase: "starting", done: 0, total: 0 };
@@ -3728,6 +3772,13 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
       return `Still running (${Math.round((Date.now() - job.started) / 1e3)} s): ${job.progress.phase}${job.progress.total ? ` ${job.progress.done} of ${job.progress.total}` : ""}. Call the tool again with the same inputs in about a minute to get the report.`;
     };
     const strList = external_exports.array(external_exports.string());
+    const freshReport = async (kind, days) => {
+      const r = await pro().call(`report?kind=${kind}`).catch(() => null);
+      if (!r?.report || Date.now() - Date.parse(r.report.date) > days * 864e5) return null;
+      return r.report.markdown + `
+
+_Scheduled report from ${r.report.date}. Ask with refresh: true for a new run now._`;
+    };
     register(
       "tracking_setup",
       {
@@ -3748,7 +3799,10 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
             clusters: external_exports.array(external_exports.object({ name: external_exports.string(), prompts: strList }))
           }).optional(),
           location_code: external_exports.number().int().optional().describe("Country (DataForSEO location code; US 2840)"),
-          language_code: external_exports.string().optional()
+          language_code: external_exports.string().optional(),
+          schedule: external_exports.enum(["server", "off"]).optional().describe("server: AlchemyAgent runs AI visibility and rankings on their cadence and keeps the latest report ready in every app"),
+          rank_cadence: external_exports.enum(["weekly", "monthly"]).optional(),
+          notify: external_exports.object({ slack_webhook: external_exports.string().optional() }).optional().describe("Where the scheduled digest goes: a Slack incoming webhook URL")
         },
         annotations: { readOnlyHint: false, openWorldHint: true }
       },
@@ -3768,7 +3822,14 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
         },
         annotations: { readOnlyHint: true, openWorldHint: true }
       },
-      async (a) => run(async () => asJob(`ai:${a.cluster ?? ""}:${(a.engines ?? []).join(",")}:${a.limit ?? ""}`, a.refresh, async (progress) => saveExports(await runAiVisibility(pro(), { ...a, progress }), a.out_dir)))
+      async (a) => run(async () => {
+        if (!a.refresh && !a.cluster && !a.limit && !a.engines) {
+          const md = await freshReport("ai", 7);
+          if (md) return md;
+        }
+        const small = !!(a.limit && a.limit <= 5);
+        return asJob(`ai:${a.cluster ?? ""}:${(a.engines ?? []).join(",")}:${a.limit ?? ""}`, a.refresh, async (progress) => saveExports(await runAiVisibility(pro(), { ...a, progress }), a.out_dir), small ? void 0 : "ai");
+      })
     );
     register(
       "rank_tracking",
@@ -3778,7 +3839,13 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
         inputSchema: { refresh: external_exports.boolean().default(false), out_dir: external_exports.string().optional() },
         annotations: { readOnlyHint: true, openWorldHint: true }
       },
-      async (a) => run(async () => asJob("rank", a.refresh, async (progress) => saveExports(await runRanks(pro(), { progress }), a.out_dir)))
+      async (a) => run(async () => {
+        if (!a.refresh) {
+          const md = await freshReport("rank", 7);
+          if (md) return md;
+        }
+        return asJob("rank", a.refresh, async (progress) => saveExports(await runRanks(pro(), { progress }), a.out_dir), "rank");
+      })
     );
     register(
       "keyword_gaps",
@@ -3817,6 +3884,28 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
       async (a) => run(async () => saveExports(await runResearch(pro(), a), a.out_dir))
     );
     register(
+      "latest_report",
+      {
+        title: "Latest scheduled report (AI visibility or rankings)",
+        description: "Show the latest AI visibility or rankings report that AlchemyAgent ran on schedule for this account, with spreadsheet download links, or queue a fresh run (run_now) for the next scheduled tick (within the hour). Use this first when someone asks how they're doing this week.",
+        inputSchema: { kind: external_exports.enum(["ai", "rank"]).default("ai"), run_now: external_exports.boolean().default(false) },
+        annotations: { readOnlyHint: false, openWorldHint: true }
+      },
+      async (a) => run(async () => {
+        if (a.run_now) {
+          await pro().call("report/run", { kind: a.kind });
+          return `Queued: a new ${a.kind === "ai" ? "AI visibility" : "rankings"} run starts within the hour. Ask for the latest report after that.`;
+        }
+        const r = await pro().call(`report?kind=${a.kind}`);
+        if (!r.report) return `No scheduled ${a.kind === "ai" ? "AI visibility" : "rankings"} report yet.${r.queued ? " One is queued and runs within the hour." : " Turn on schedule: server in tracking_setup, or run it now with run_now."}${r.last_error ? `
+
+Last error: ${r.last_error}` : ""}`;
+        return r.report.markdown + (r.last_error ? `
+
+The last scheduled attempt failed: ${r.last_error}` : "");
+      })
+    );
+    register(
       "plan_usage",
       {
         title: "AlchemyAgent plan and usage",
@@ -3839,35 +3928,8 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
         ].join("\n");
       })
     );
-    register(
-      "bing_webmaster",
-      {
-        title: "Bing Webmaster Tools report",
-        description: "Read the user's own Bing Webmaster Tools data with their API key: Bing clicks and impressions (last 28 days vs the previous 28), top queries, top pages, pages in Bing's index, crawl errors and URL submission quota. Call without site_url to list the sites in the account. Uses the Bing Webmaster API (https://learn.microsoft.com/en-us/bingwebmaster/getting-access).",
-        inputSchema: {
-          site_url: external_exports.string().optional().describe("A site in the user's Bing Webmaster Tools account, e.g. https://example.com/ or example.com. Omit to list sites."),
-          report: external_exports.enum(["overview", "queries", "pages", "crawl"]).default("overview").describe("overview: traffic, top 10 queries and crawl; or one section in more depth"),
-          limit: external_exports.number().int().min(1).max(100).default(15).describe("Rows for query/page tables")
-        },
-        annotations: { readOnlyHint: true, openWorldHint: true }
-      },
-      async ({ site_url, report, limit }) => {
-        try {
-          if (!opts.bingKey) throw new Error(BING_KEY_HELP);
-          const sites = await listSites2(f, opts.bingKey);
-          if (!site_url) return { content: [{ type: "text", text: sitesMarkdown(sites) }] };
-          const site = matchSite(sites, site_url);
-          if (!site) throw new Error(`${site_url} isn't in this Bing Webmaster Tools account. ${sites.length ? "Sites in the account: " + sites.map((s) => s.url).join(", ") : "Add and verify it at https://www.bing.com/webmasters first."}`);
-          const sections = report === "overview" ? ["traffic", "queries", "crawl"] : [report];
-          const data = await bingReport(f, opts.bingKey, site.url, sections);
-          return { content: [{ type: "text", text: bingMarkdown(data, report === "overview" ? Math.min(limit, 10) : limit) }] };
-        } catch (e) {
-          return errorResult(e);
-        }
-      }
-    );
   }
-  registerPrompts(server2, !!opts.remote);
+  registerPrompts(server2, !!opts.remote, !opts.remote || !!opts.proHosted);
   return server2;
 }
 
