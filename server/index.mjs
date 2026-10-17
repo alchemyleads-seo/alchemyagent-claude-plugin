@@ -159,6 +159,13 @@ var StdioServerTransport = class {
 
 // src/quality.ts
 var PRO_HELP = "Page quality rating is part of AlchemyAgent Pro: each page is rated 1 to 9 against our private rubric (built from the concepts in Google's public Search Quality Rater Guidelines), with quoted evidence and a specific fix. Add your Pro license key in the AlchemyAgent settings (Claude Desktop: Settings > Extensions > AlchemyAgent > Configure; Claude Code: /plugin, then AlchemyAgent's settings). Get Pro: https://alchemyagent.ai/#pro";
+var LINKS_PRO_HELP = "Internal link rewiring is part of AlchemyAgent Pro: it crawls your site from your computer, reads your own Search Console, and plans the body links that move pages stuck at positions 8 to 15 onto page one. Add your Pro license key in the AlchemyAgent settings (Claude Desktop: Settings > Extensions > AlchemyAgent > Configure; Claude Code: /plugin, then AlchemyAgent's settings). Get Pro: https://alchemyagent.ai/#pro";
+async function verifyPro(f, apiBase, licenseKey, feature) {
+  const r = await f(`${apiBase}/api/pro/verify`, { method: "POST", headers: { authorization: `Bearer ${licenseKey}`, "content-type": "application/json", "user-agent": "AlchemyAgent-MCP" }, body: JSON.stringify({ feature }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || `AlchemyAgent license check failed (${r.status})`);
+  return j;
+}
 async function fetchPage(f, url) {
   try {
     const r = await f(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)", accept: "text/html,application/xhtml+xml" }, redirect: "follow" });
@@ -198,141 +205,10 @@ function qualityMarkdown(rs, failed = []) {
   return L.join("\n").trimEnd();
 }
 
-// src/pagespeed.ts
-var GOOGLE_PSI = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
-var FIELD_METRICS = {
-  LARGEST_CONTENTFUL_PAINT_MS: ["LCP", (v) => `${(v / 1e3).toFixed(1)}s`],
-  INTERACTION_TO_NEXT_PAINT: ["INP", (v) => `${v}ms`],
-  CUMULATIVE_LAYOUT_SHIFT_SCORE: ["CLS", (v) => (v / 100).toFixed(2)],
-  FIRST_CONTENTFUL_PAINT_MS: ["FCP", (v) => `${(v / 1e3).toFixed(1)}s`],
-  EXPERIMENTAL_TIME_TO_FIRST_BYTE: ["TTFB", (v) => `${(v / 1e3).toFixed(1)}s`]
-};
-var LAB_METRICS = ["largest-contentful-paint", "total-blocking-time", "cumulative-layout-shift", "first-contentful-paint", "speed-index"];
-function normalizeUrl(input) {
-  const s = input.trim();
-  const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
-  if (!/^https?:$/.test(u.protocol)) throw new Error("Only http(s) URLs can be checked.");
-  if (/^(localhost|127\.|10\.|192\.168\.|\[?::1)/.test(u.hostname)) throw new Error("PageSpeed can only test public URLs.");
-  return u.toString();
-}
-var CACHE_TTL_MS = 30 * 60 * 1e3;
-var cache = /* @__PURE__ */ new Map();
-async function runPsi(url, strategy, opts = {}) {
-  const ck = `${strategy}|${url}`;
-  const hit = cache.get(ck);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.body;
-  const q = new URLSearchParams({ url, strategy });
-  let endpoint = `${opts.apiBase ?? ""}/api/psi`;
-  if (opts.apiKey || !opts.apiBase) {
-    q.set("category", "performance");
-    if (opts.apiKey) q.set("key", opts.apiKey);
-    endpoint = GOOGLE_PSI;
-  }
-  const f = opts.fetchFn ?? fetch;
-  const res = await f(`${endpoint}?${q}`, { headers: { accept: "application/json" } });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg2 = body?.error?.message ?? `HTTP ${res.status}`;
-    if (res.status === 429) throw new Error(`PageSpeed quota reached (${msg2}). Try again later, or add your own free PageSpeed Insights API key in the extension settings.`);
-    throw new Error(`PageSpeed Insights failed: ${msg2}`);
-  }
-  if (cache.size > 200) cache.clear();
-  cache.set(ck, { at: Date.now(), body });
-  return body;
-}
-function summarize(raw, strategy) {
-  const lh = raw?.lighthouseResult ?? {};
-  const page = raw?.loadingExperience;
-  const origin = raw?.originLoadingExperience;
-  const hasMetrics = (x) => x?.metrics && Object.keys(x.metrics).length > 0 && x.origin_fallback !== true;
-  const src = hasMetrics(page) ? page : origin?.metrics ? origin : null;
-  const scope = src === page && src ? "page" : src ? "origin" : "none";
-  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt2]]) => ({ name, value: fmt2(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
-  const audits = lh.audits ?? {};
-  const lab = LAB_METRICS.filter((k) => audits[k]?.displayValue).map((k) => ({ name: audits[k].title, value: audits[k].displayValue }));
-  const opportunities = Object.values(audits).filter((a) => a?.details?.type === "opportunity" && (a.details.overallSavingsMs ?? 0) >= 100 && (a.score ?? 1) < 0.9).sort((a, b) => b.details.overallSavingsMs - a.details.overallSavingsMs).slice(0, 5).map((a) => ({ title: a.title, savings: `~${(a.details.overallSavingsMs / 1e3).toFixed(1)}s` }));
-  const score = lh.categories?.performance?.score;
-  return {
-    url: lh.finalDisplayedUrl ?? lh.finalUrl ?? raw?.id ?? "",
-    strategy,
-    performanceScore: typeof score === "number" ? Math.round(score * 100) : null,
-    field: { scope, overall: src?.overall_category ? String(src.overall_category).replace("_", " ").toLowerCase() : null, metrics },
-    lab,
-    opportunities
-  };
-}
-function toMarkdown(results) {
-  const out = [];
-  for (const r of results) {
-    out.push(`## ${r.strategy === "mobile" ? "Mobile" : "Desktop"}: ${r.url}`);
-    out.push(`Lighthouse performance score: **${r.performanceScore ?? "n/a"}/100** (lab test, one run)`);
-    if (r.field.scope === "none") {
-      out.push("Real-user Core Web Vitals: not enough Chrome UX Report traffic for this page or origin yet.");
-    } else {
-      out.push(`Real-user Core Web Vitals (${r.field.scope === "page" ? "this URL" : "whole origin"}, 28-day p75): **${r.field.overall ?? "n/a"}**`);
-      for (const m of r.field.metrics) out.push(`- ${m.name}: ${m.value} (${m.rating})`);
-    }
-    if (r.lab.length) {
-      out.push("Lab metrics:");
-      for (const m of r.lab) out.push(`- ${m.name}: ${m.value}`);
-    }
-    if (r.opportunities.length) {
-      out.push("Biggest opportunities:");
-      for (const o of r.opportunities) out.push(`- ${o.title} (${o.savings})`);
-    }
-    out.push("");
-  }
-  out.push("Field data rates real users; Google uses it for the page experience signal. The lab score is a single simulated run and moves between tests.");
-  out.push("AlchemyAgent Pro tracks this weekly per template and turns it into a ranked fix list: https://alchemyagent.ai");
-  out.push("Data: Google PageSpeed Insights and the Chrome UX Report.");
-  return out.join("\n");
-}
-
-// src/crux.ts
-var METRICS = {
-  largest_contentful_paint: { name: "LCP", good: 2500, poor: 4e3, fmt: (v) => `${(v / 1e3).toFixed(2)}s` },
-  interaction_to_next_paint: { name: "INP", good: 200, poor: 500, fmt: (v) => `${Math.round(v)}ms` },
-  cumulative_layout_shift: { name: "CLS", good: 0.1, poor: 0.25, fmt: (v) => v.toFixed(2) },
-  first_contentful_paint: { name: "FCP", good: 1800, poor: 3e3, fmt: (v) => `${(v / 1e3).toFixed(2)}s` },
-  experimental_time_to_first_byte: { name: "TTFB", good: 800, poor: 1800, fmt: (v) => `${(v / 1e3).toFixed(2)}s` }
-};
-var CRUX_METRICS = Object.keys(METRICS);
-var BARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
-function spark(vals) {
-  const lo = Math.min(...vals), hi = Math.max(...vals);
-  return vals.map((v) => BARS[hi === lo ? 3 : Math.round((v - lo) / (hi - lo) * 7)]).join("");
-}
-var rate = (v, m) => v <= m.good ? "good" : v <= m.poor ? "needs improvement" : "poor";
-var ymd = (d) => d ? `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}` : "?";
-function summarizeHistory(rec) {
-  const periods = rec?.collectionPeriods ?? [];
-  const rows = [];
-  for (const [key, m] of Object.entries(METRICS)) {
-    const p75s = rec?.metrics?.[key]?.percentilesTimeseries?.p75s ?? [];
-    const vals = p75s.map((v) => v == null ? NaN : Number(v)).filter((v) => !Number.isNaN(v));
-    if (vals.length < 2) continue;
-    const first = vals[0], latest = vals[vals.length - 1];
-    rows.push({ metric: m.name, first: m.fmt(first), latest: m.fmt(latest), changePct: first ? Math.round((latest - first) / first * 100) : 0, rating: rate(latest, m), spark: spark(vals), points: vals.length });
-  }
-  return { rows, from: ymd(periods[0]?.firstDate), to: ymd(periods[periods.length - 1]?.lastDate) };
-}
-function trendMarkdown(data) {
-  const { rows, from, to } = summarizeHistory(data.record);
-  if (!rows.length) return `Not enough Chrome UX Report history for ${data.key} yet.`;
-  const out = [
-    `## Core Web Vitals trend: ${data.key}`,
-    `${data.scope === "origin" ? "Whole origin" : "This URL"}, ${data.formFactor.toLowerCase()}, 75th percentile of real Chrome users, ${from} to ${to} (weekly, 28-day windows).`,
-    "",
-    "| Metric | Then | Now | Change | Now rated | Trend |",
-    "|---|---|---|---|---|---|",
-    ...rows.map((r) => `| ${r.metric} | ${r.first} | ${r.latest} | ${r.changePct > 0 ? "+" : ""}${r.changePct}% | ${r.rating} | ${r.spark} |`),
-    "",
-    "Lower is better for every metric. A metric passes Core Web Vitals when its p75 is rated good (LCP, INP and CLS are the three that count).",
-    "AlchemyAgent Pro ties these trends to releases and template changes, and alerts you when a metric slips: https://alchemyagent.ai",
-    "Source: Chrome UX Report."
-  ];
-  return out.join("\n");
-}
+// src/links.ts
+import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
 
 // src/robots.ts
 function parseRobots(txt) {
@@ -471,8 +347,8 @@ async function get(f, url, ua, ms = 15e3) {
   const t = setTimeout(() => ctl.abort(), ms);
   try {
     const r = await f(url, { headers: { "user-agent": ua, accept: "text/html,*/*" }, redirect: "follow", signal: ctl.signal });
-    const text = await r.text().catch(() => "");
-    return { status: r.status, headers: r.headers, text, url: r.url || url };
+    const text2 = await r.text().catch(() => "");
+    return { status: r.status, headers: r.headers, text: text2, url: r.url || url };
   } catch (e) {
     return { status: 0, headers: new Headers(), text: "", url, error: e instanceof Error ? e.message : String(e) };
   } finally {
@@ -526,8 +402,8 @@ async function crawlerCheck(input, f = fetch, ipCounts = {}) {
       row.probe = r.status === 0 ? "no response" : challenged(r) ? `${r.status} challenge` : r.status === page.status ? `${r.status} same as browser` : `${r.status} (browser got ${page.status})`;
     }));
   }
-  const sitemapUrls = robots.sitemaps.length ? robots.sitemaps.slice(0, 5) : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
-  const sitemaps = await Promise.all(sitemapUrls.map(async (u) => {
+  const sitemapUrls2 = robots.sitemaps.length ? robots.sitemaps.slice(0, 5) : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
+  const sitemaps = await Promise.all(sitemapUrls2.map(async (u) => {
     const r = await get(f, u, OUR_UA);
     return { url: u, status: r.status, challenged: challenged(r), listed: robots.sitemaps.includes(u) };
   }));
@@ -566,6 +442,598 @@ function crawlerMarkdown(r, from = "your machine") {
   out.push("- Operators with an IP list can be allowlisted by IP in your firewall, which is safer than allowing by user-agent alone.");
   out.push("", aiPrefsMarkdown(r.aiPrefs));
   out.push("", "AlchemyAgent Pro rechecks this weekly and reads your CDN logs to confirm which AI bots actually reach you: https://alchemyagent.ai");
+  return out.join("\n");
+}
+
+// src/links.ts
+var LINKS_UA = "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)";
+var STOP = new Set("a an and are as at be by can do for from how i in is it of on or our the to vs what when where which who why with you your best top near me 2024 2025 2026".split(" "));
+var GENERIC_TOPIC = new Set("seo services service agency agencies company companies marketing digital google online business strategy strategies guide tips tools free cost".split(" "));
+var GENERIC = /^(read more|read story|read the story|learn more|click here|here|more|this|link|this page|see more|find out more|continue reading|details|view|view more)$/i;
+var UTILITY = /^\/(call|contact[^/]*|book[^/]*|privacy[^/]*|terms[^/]*|legal|disclaimer|[^/]*polic(y|ies)|site-?map|entitymap\.html|thank[^/]*|search[^/]*|cart|account|login|blog|newsletters?)\/?$|\.html$/i;
+var OPERATOR = /[":]|^site |^inurl|^intitle/;
+var SKIP_PATH = /(^\/wp-|\/feed\/?$|\/tag\/|\/author\/|\/page\/\d+|\.(pdf|jpe?g|png|webp|gif|svg|zip|xml|css|js)$|\/cdn-cgi\/)/i;
+var ZONE_TAGS = ["nav", "header", "footer", "aside"];
+var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;|&rsquo;|&lsquo;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&ndash;|&mdash;/g, "-").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
+var text = (fragment) => decode(fragment.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+function norm(u) {
+  try {
+    const p = new URL(u);
+    return `${p.protocol}//${p.host.toLowerCase().replace(/^www\./, "")}${p.pathname.replace(/\/+$/, "") || "/"}`;
+  } catch {
+    return u;
+  }
+}
+function tokens(s) {
+  return new Set((s.toLowerCase().match(/[a-z0-9][a-z0-9+.-]*/g) ?? []).filter((w) => !STOP.has(w) && w.length > 2));
+}
+var minus = (a, b) => new Set([...a].filter((w) => !b.has(w)));
+function zones(html) {
+  const spans = [];
+  for (const tag2 of ZONE_TAGS)
+    for (const m of html.matchAll(new RegExp(`<${tag2}\\b[\\s\\S]*?</${tag2}>`, "gi")))
+      spans.push([m.index, m.index + m[0].length, tag2 === "footer" ? "footer" : tag2 === "aside" ? "other" : "nav"]);
+  return spans;
+}
+function extractLinks(pageUrl, html, host3) {
+  const clean2 = html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1>/gi, (m) => " ".repeat(m.length));
+  const zs = zones(clean2);
+  const out = [];
+  for (const m of clean2.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const hm = m[1].match(/\bhref\s*=\s*["']([^"']+)["']/i);
+    if (!hm) continue;
+    const href = decode(hm[1]).trim();
+    if (/^(#|mailto:|tel:|javascript:)/i.test(href)) continue;
+    let abs;
+    try {
+      abs = new URL(href, pageUrl);
+    } catch {
+      continue;
+    }
+    abs.hash = "";
+    if (!/^https?:$/.test(abs.protocol) || abs.hostname.toLowerCase().replace(/^www\./, "") !== host3 || SKIP_PATH.test(abs.pathname)) continue;
+    let zone = "body";
+    for (const [a, b, z] of zs) {
+      if (a <= m.index && m.index < b) {
+        zone = z;
+        if (z === "nav" || z === "footer") break;
+      }
+    }
+    const anchor = text(m[2]) || m[1].match(/\baria-label\s*=\s*["']([^"']+)/i)?.[1] || m[2].match(/alt\s*=\s*["']([^"']+)/i)?.[1] || "";
+    out.push({ to: norm(abs.href.split("?")[0]), raw: abs.href, anchor: anchor.slice(0, 120), zone, nofollow: /\brel\s*=\s*["'][^"']*nofollow/i.test(m[1]) });
+  }
+  return out;
+}
+var NON_BODY = /<!--[\s\S]*?-->|<(script|style|noscript|template|nav|header|footer|aside|form)\b[\s\S]*?<\/\1>/gi;
+function bodyText(html) {
+  const x = html.replace(NON_BODY, " ");
+  const m = x.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i);
+  return text(m ? m[2] : x);
+}
+function paragraphs(html) {
+  const x = html.replace(NON_BODY, " ");
+  const out = [];
+  for (const m of x.matchAll(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const t = text(m[2]);
+    if (t.length >= 60 && t.length <= 700 && !/^(by [a-z]+ [a-z]+ ·|published|updated|table of contents)/i.test(t)) out.push(t);
+    if (out.length >= 400) break;
+  }
+  return out;
+}
+async function pool(items, n, fn, onDone) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) {
+      const k = i++;
+      out[k] = await fn(items[k]);
+      onDone?.();
+    }
+  }));
+  return out;
+}
+async function sitemapUrls(base, f, limit) {
+  const origin = new URL(base).origin;
+  const host3 = new URL(base).hostname.replace(/^www\./, "");
+  const robots = await get(f, `${origin}/robots.txt`, LINKS_UA, 1e4);
+  const listed = robots.status === 200 ? parseRobots(robots.text).sitemaps : [];
+  const todo = listed.length ? [...listed] : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
+  const seenMaps = /* @__PURE__ */ new Set(), seen = /* @__PURE__ */ new Set(), urls = [];
+  while (todo.length && urls.length < limit && seenMaps.size < 60) {
+    const sm = todo.shift();
+    if (seenMaps.has(sm)) continue;
+    seenMaps.add(sm);
+    const r = await get(f, sm, LINKS_UA, 2e4);
+    if (r.status !== 200) continue;
+    const locs = [...r.text.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/gi)].map((m) => decode(m[1]));
+    if (/<sitemapindex/i.test(r.text)) {
+      todo.push(...locs.filter((u) => !/(image|video|news|agentic)/i.test(u)));
+      continue;
+    }
+    for (const u of locs) {
+      let h = "";
+      try {
+        h = new URL(u).hostname.replace(/^www\./, "");
+      } catch {
+        continue;
+      }
+      if (h !== host3 || seen.has(u) || /\.(jpe?g|png|webp|gif|pdf|xml)(\?|$)/i.test(u)) continue;
+      seen.add(u);
+      urls.push(u);
+      if (urls.length >= limit) break;
+    }
+  }
+  return urls;
+}
+var isChallenge = (status, headers, body) => headers.get("cf-mitigated") === "challenge" || (status === 403 || status === 503) && /Just a moment|cf-chl|captcha|challenge-platform/i.test(body.slice(0, 5e3));
+async function crawl(urls, f, host3, onDone) {
+  const out = {};
+  const rows = await pool(urls, 6, async (u) => {
+    const r = await get(f, u, LINKS_UA, 2e4);
+    if (r.status === 0) return [u, { status: 0 }];
+    if (isChallenge(r.status, r.headers, r.text)) return [u, { status: r.status, challenged: true }];
+    if (r.status !== 200 || !/html/i.test(r.headers.get("content-type") ?? "")) return [u, { status: r.status }];
+    const t = r.text;
+    return [u, {
+      status: 200,
+      final: norm(r.url),
+      title: text(t.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").slice(0, 160),
+      h1: text(t.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "").slice(0, 160),
+      noindex: /<meta[^>]+name=["']robots["'][^>]+noindex/i.test(t),
+      links: extractLinks(r.url, t, host3),
+      text: bodyText(t).slice(0, 4e4),
+      paras: paragraphs(t)
+    }];
+  }, onDone);
+  for (const [u, p] of rows) out[norm(u)] = p;
+  return out;
+}
+async function resolveTargets(targets, f, onDone) {
+  const out = {};
+  const rows = await pool(Object.entries(targets), 6, async ([u, raw]) => {
+    let cur = raw.split("?")[0], hops = 0;
+    while (hops < 6) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 15e3);
+      try {
+        const r = await f(cur, { headers: { "user-agent": LINKS_UA, accept: "text/html,*/*" }, redirect: "manual", signal: ctl.signal });
+        await r.body?.cancel().catch(() => {
+        });
+        const loc = r.headers.get("location");
+        if ([301, 302, 307, 308].includes(r.status) && loc) {
+          cur = new URL(loc, cur).href;
+          hops++;
+          continue;
+        }
+        return [u, { status: r.status, final: norm(cur), hops }];
+      } catch {
+        return [u, { status: 0 }];
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return [u, { status: 310, final: norm(cur), hops }];
+  }, onDone);
+  for (const [u, r] of rows) out[u] = r;
+  return out;
+}
+function pagerank(nodes, edges, d = 0.85, iters = 60) {
+  const n = nodes.length;
+  if (!n) return {};
+  const idx = new Map(nodes.map((u, i) => [u, i]));
+  const outs = nodes.map(() => []);
+  const list = edges instanceof Set ? [...edges].map((e) => e.split("	")) : edges;
+  for (const [a, b] of list) if (idx.has(a) && idx.has(b) && a !== b) outs[idx.get(a)].push(idx.get(b));
+  let pr = new Array(n).fill(1 / n);
+  for (let it = 0; it < iters; it++) {
+    const nxt = new Array(n).fill((1 - d) / n);
+    let dangling = 0;
+    for (let i = 0; i < n; i++) if (!outs[i].length) dangling += pr[i];
+    for (let i = 0; i < n; i++) if (outs[i].length) {
+      const share = d * pr[i] / outs[i].length;
+      for (const j of outs[i]) nxt[j] += share;
+    }
+    for (let j = 0; j < n; j++) nxt[j] += d * dangling / n;
+    pr = nxt;
+  }
+  const top = Math.max(...pr) || 1;
+  return Object.fromEntries(nodes.map((u, i) => [u, Math.round(pr[i] / top * 1e4) / 100]));
+}
+function bestSentence(paras, anchor) {
+  const all = tokens(anchor);
+  const want = minus(all, GENERIC_TOPIC).size ? minus(all, GENERIC_TOPIC) : all;
+  let best = "", score = 0;
+  for (const para of paras)
+    for (const s of para.split(/(?<=[.!?])\s+/)) {
+      if (s.length < 40 || s.length > 400) continue;
+      const st = tokens(s);
+      const hit = [...want].filter((w) => st.has(w)).length;
+      if (hit > score) {
+        best = s;
+        score = hit;
+      }
+    }
+  return score >= Math.min(2, want.size) ? best.slice(0, 260) : "";
+}
+var esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function buildPlan(pages, resolved, gsc, base, o) {
+  const brands = o.brand.map((b) => b.trim().toLowerCase()).filter(Boolean);
+  const brandRe = brands.length ? new RegExp(brands.map(esc).join("|"), "i") : null;
+  const isTopicQ = (q) => !OPERATOR.test(q) && !(brandRe && brandRe.test(q));
+  const pathOf = (u) => {
+    try {
+      return new URL(u).pathname || "/";
+    } catch {
+      return "/";
+    }
+  };
+  const utility = (u) => UTILITY.test(pathOf(u));
+  const ok = {};
+  for (const [u, p] of Object.entries(pages)) if (p.status === 200 && !p.noindex) ok[u] = { title: p.title ?? "", h1: p.h1 ?? "", links: p.links ?? [], text: p.text ?? "", paras: p.paras ?? [] };
+  const nodes = Object.keys(ok).sort();
+  const status = {};
+  for (const u of nodes) status[u] = { status: 200, final: u };
+  for (const [u, r] of Object.entries(resolved)) if (!status[u]) status[u] = r;
+  for (const [u, p] of Object.entries(pages)) if (!status[u] && p.status >= 400) status[u] = { status: p.status, final: u };
+  const freq = /* @__PURE__ */ new Map();
+  for (const p of Object.values(ok)) for (const k of new Set(p.links.map((l) => `${l.to}	${l.anchor.toLowerCase()}`))) freq.set(k, (freq.get(k) ?? 0) + 1);
+  if (nodes.length >= 10) {
+    for (const p of Object.values(ok)) for (const l of p.links) if (l.zone === "body" && (freq.get(`${l.to}	${l.anchor.toLowerCase()}`) ?? 0) >= 0.4 * nodes.length) l.zone = "template";
+  }
+  const edges = /* @__PURE__ */ new Set(), bodyEdges = /* @__PURE__ */ new Set();
+  const anyIn = /* @__PURE__ */ new Map(), anchorsTo = /* @__PURE__ */ new Map();
+  const redirects = [], broken = [], generic = [];
+  for (const src of nodes) {
+    for (const l of ok[src].links) {
+      const st = status[l.to] ?? { status: 0 };
+      const dst = st.final ?? l.to;
+      if (dst !== l.to && ([301, 302, 307, 308].includes(st.status) || st.status === 200 && st.hops)) redirects.push({ page: src, href: l.raw, final: dst, anchor: l.anchor, zone: l.zone });
+      else if (st.status >= 400) {
+        broken.push({ page: src, href: l.raw, status: st.status, anchor: l.anchor, zone: l.zone });
+        continue;
+      }
+      if (dst === src) continue;
+      edges.add(`${src}	${dst}`);
+      anyIn.set(dst, (anyIn.get(dst) ?? 0) + 1);
+      if (l.zone === "body") {
+        bodyEdges.add(`${src}	${dst}`);
+        const a = l.anchor.trim();
+        if (a && GENERIC.test(a)) generic.push({ page: src, to: dst, anchor: a });
+        if (a.length >= 4 && !GENERIC.test(a)) {
+          const k = a.toLowerCase();
+          if (!anchorsTo.has(k)) anchorsTo.set(k, /* @__PURE__ */ new Set());
+          anchorsTo.get(k).add(dst);
+        }
+      }
+    }
+  }
+  const pr = pagerank(nodes, edges);
+  const gp = gsc.pages;
+  const qByPage = /* @__PURE__ */ new Map();
+  for (const [page, q, c, i, pos] of gsc.pq) if (isTopicQ(q)) {
+    if (!qByPage.has(page)) qByPage.set(page, []);
+    qByPage.get(page).push([q, c, i, pos]);
+  }
+  const prof = /* @__PURE__ */ new Map();
+  for (const u of nodes) {
+    const t = /* @__PURE__ */ new Map();
+    for (const [q, , i] of [...qByPage.get(u) ?? []].sort((a, b) => b[2] - a[2]).slice(0, 40))
+      for (const w of minus(tokens(q), GENERIC_TOPIC)) t.set(w, (t.get(w) ?? 0) + Math.log10(i + 10));
+    for (const w of minus(tokens(`${ok[u].title} ${ok[u].h1}`), GENERIC_TOPIC)) t.set(w, (t.get(w) ?? 0) + 1);
+    prof.set(u, t);
+  }
+  const total = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+  const sim = (a, b) => {
+    const ta = prof.get(a), tb = prof.get(b);
+    if (!ta.size || !tb.size) return 0;
+    let inter = 0;
+    for (const [w, v] of ta) if (tb.has(w)) inter += Math.min(v, tb.get(w));
+    return inter / (Math.min(total(ta), total(tb)) || 1);
+  };
+  const topicImpr = new Map(nodes.map((u) => [u, (qByPage.get(u) ?? []).reduce((a, r) => a + r[2], 0)]));
+  const topicRank = new Map(nodes.map((u) => [u, (qByPage.get(u) ?? []).filter((r) => r[3] && r[3] <= 10)]));
+  const ranksWell = (u) => !utility(u) && ok[u].text.split(/\s+/).length >= 250 && topicRank.get(u).reduce((a, r) => a + r[2], 0) >= 20;
+  const cands = nodes.filter((u) => gp[u] && !utility(u) && gp[u].position >= o.posMin && gp[u].position <= o.posMax && topicImpr.get(u) >= o.minImpressions);
+  cands.sort((a, b) => topicImpr.get(b) - topicImpr.get(a));
+  const usedAnchor = new Map([...anchorsTo].map(([a, v]) => [a, new Set(v)]));
+  const proposals = [];
+  for (const c of cands) {
+    const pageWords = tokens(`${ok[c].title} ${ok[c].h1} ${ok[c].text.slice(0, 2e4)}`);
+    const qs = [...qByPage.get(c) ?? []].sort((a, b) => b[2] - a[2]).map((r) => r[0]).filter((q) => q.length >= 4 && q.length <= 60 && q.split(/\s+/).length <= 6 && [...tokens(q)].every((w) => pageWords.has(w))).slice(0, 8);
+    const donors = [];
+    for (const d of nodes) {
+      if (d === c || bodyEdges.has(`${d}	${c}`) || !ranksWell(d)) continue;
+      const s = sim(c, d);
+      if (s < 0.12) continue;
+      donors.push([s * (1 + Math.log10((gp[d]?.impressions ?? 0) + 10)) * (1 + pr[d] / 50), s, d]);
+    }
+    donors.sort((a, b) => b[0] - a[0]);
+    let k = 0, taken = 0;
+    for (const [, s, d] of donors.slice(0, 12)) {
+      if (taken >= o.donorsPer) break;
+      const order = [...qs.slice(k), ...qs.slice(0, k)];
+      const anchor = order.find((q) => ![...usedAnchor.get(q.toLowerCase()) ?? []].some((x) => x !== c)) ?? (ok[c].h1 || ok[c].title).split(" | ")[0];
+      const sent = bestSentence(ok[d].paras.length ? ok[d].paras : [ok[d].text], anchor);
+      if (!sent) continue;
+      k++;
+      taken++;
+      if (!usedAnchor.has(anchor.toLowerCase())) usedAnchor.set(anchor.toLowerCase(), /* @__PURE__ */ new Set());
+      usedAnchor.get(anchor.toLowerCase()).add(c);
+      proposals.push({
+        target: c,
+        target_title: ok[c].title,
+        target_position: gp[c].position,
+        target_impressions: topicImpr.get(c),
+        target_clicks: gp[c].clicks,
+        donor: d,
+        donor_title: ok[d].title,
+        donor_position: gp[d]?.position ?? 0,
+        similarity: Math.round(s * 100) / 100,
+        donor_authority: pr[d],
+        anchor,
+        place_near: sent,
+        target_authority_before: 0,
+        target_authority_after: 0
+      });
+    }
+  }
+  const after = pagerank(nodes, /* @__PURE__ */ new Set([...edges, ...proposals.map((p) => `${p.donor}	${p.target}`)]));
+  for (const p of proposals) {
+    p.target_authority_before = pr[p.target];
+    p.target_authority_after = after[p.target];
+  }
+  const home = norm(base);
+  const orphans = nodes.filter((u) => !anyIn.get(u) && u !== home);
+  const tmpl = {};
+  for (const l of ok[home]?.links ?? []) tmpl[l.zone] = (tmpl[l.zone] ?? 0) + 1;
+  return {
+    pages: nodes.length,
+    edges: edges.size,
+    body_edges: bodyEdges.size,
+    candidates: cands.length,
+    proposals,
+    redirect_links: redirects,
+    broken_links: broken,
+    generic_anchors: generic,
+    mixed_anchors: [...anchorsTo].filter(([, v]) => v.size > 1).map(([anchor, v]) => ({ anchor, targets: [...v].sort() })),
+    orphans,
+    prune_or_link: orphans.filter((u) => (gp[u]?.impressions ?? 0) < 10),
+    leave_alone: nodes.filter((u) => gp[u] && gp[u].position && gp[u].position <= 5 && gp[u].clicks >= 10),
+    homepage_links: tmpl,
+    authority: Object.fromEntries(Object.entries(pr).sort((a, b) => b[1] - a[1]).slice(0, 30)),
+    unlinked_candidates: cands.filter((c) => !proposals.some((p) => p.target === c))
+  };
+}
+async function runLinks(o) {
+  const host3 = new URL(o.base).hostname.toLowerCase().replace(/^www\./, "");
+  const prog = o.progress ?? { phase: "", done: 0, total: 0 };
+  Object.assign(prog, { phase: "reading sitemaps", done: 0, total: 0 });
+  const urls = await sitemapUrls(o.base, o.f, o.maxPages);
+  if (!urls.length) throw new Error(`No sitemap URLs found for ${o.base} (checked robots.txt Sitemap lines and /sitemap.xml). The crawl starts from the sitemap, so publish one first.`);
+  Object.assign(prog, { phase: "crawling pages", done: 0, total: urls.length });
+  const pages = await crawl(urls, o.f, host3, () => prog.done++);
+  const blocked = Object.values(pages).filter((p) => p.challenged).length;
+  const known = new Set(Object.keys(pages));
+  const targets = {};
+  for (const p of Object.values(pages)) for (const l of p.status === 200 ? p.links ?? [] : []) if (!known.has(l.to) && !targets[l.to] && Object.keys(targets).length < 1500) targets[l.to] = l.raw;
+  Object.assign(prog, { phase: "checking link targets", done: 0, total: Object.keys(targets).length });
+  const resolved = await resolveTargets(targets, o.f, () => prog.done++);
+  Object.assign(prog, { phase: "building the plan", done: 0, total: 0 });
+  const plan = buildPlan(pages, resolved, o.gsc ?? { pages: {}, pq: [] }, o.base, o.plan);
+  return { site: norm(o.base), date: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), range: [o.plan.posMin, o.plan.posMax], gscProperty: o.gsc ? o.gscProperty : void 0, crawled: Object.keys(pages).length, blocked, sitemapUrls: urls.length, plan };
+}
+var csvCell = (v) => {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+var csv = (rows) => rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+async function saveLinkFiles(r, md, outDir) {
+  const host3 = new URL(r.site).hostname;
+  const dir = resolvePath((outDir ?? join(homedir(), "Downloads", "alchemyagent-reports")).replace(/^~(?=\/)/, homedir()));
+  await mkdir(dir, { recursive: true });
+  const stem = join(dir, `internal-links-${host3}-${r.date}`);
+  const p = r.plan;
+  const fields = ["target", "target_position", "target_impressions", "target_clicks", "donor", "donor_position", "similarity", "donor_authority", "anchor", "place_near", "target_authority_before", "target_authority_after"];
+  const cleanup = [["type", "page", "href_or_to", "detail", "anchor", "zone"]];
+  for (const x of p.redirect_links) cleanup.push(["redirect (rewrite to final URL)", x.page, x.href, x.final, x.anchor, x.zone]);
+  for (const x of p.broken_links) cleanup.push(["broken", x.page, x.href, x.status, x.anchor, x.zone]);
+  for (const x of p.generic_anchors) cleanup.push(["generic anchor", x.page, x.to, "", x.anchor, "body"]);
+  for (const x of p.mixed_anchors) cleanup.push(["same anchor, different URLs", "", x.targets.join(" | "), "", x.anchor, "body"]);
+  for (const u of p.orphans) cleanup.push([`orphan${p.prune_or_link.includes(u) ? " (prune or link)" : ""}`, u, "", "", "", ""]);
+  const files = [`${stem}.csv`, `${stem}.cleanup.csv`, `${stem}.json`, `${stem}.md`];
+  await writeFile(files[0], csv([fields, ...p.proposals.map((x) => fields.map((k) => x[k]))]));
+  await writeFile(files[1], csv(cleanup));
+  await writeFile(files[2], JSON.stringify(r, null, 1));
+  await writeFile(files[3], md + "\n");
+  return files;
+}
+var fmt = (n) => Math.round(n).toLocaleString("en-US");
+var cell = (s) => s.replace(/\|/g, "/").replace(/\n/g, " ");
+function linksMarkdown(r, show = 25) {
+  const p = r.plan;
+  const short = (u) => u.replace(r.site.replace(/\/$/, ""), "") || "/";
+  const L = [
+    `# Internal link rewiring: ${new URL(r.site).hostname}`,
+    "",
+    `Plan only, nothing on the site changed. ${r.date}: ${p.pages} indexable pages from ${r.sitemapUrls} sitemap URLs, ${fmt(p.edges)} internal links (${fmt(p.body_edges)} in body copy).${r.blocked ? ` ${r.blocked} pages were blocked by a firewall challenge and skipped.` : ""}`
+  ];
+  if (!r.gscProperty) L.push("", "**Search Console isn't connected**, so there are no impression-based link targets in this run: cleanup only. Connect Google (gsc_connect) and run it again for the full plan.");
+  else L.push(`Search Console: ${r.gscProperty}. Impressions below are non-brand.`);
+  L.push("");
+  const targets = /* @__PURE__ */ new Map();
+  for (const x of p.proposals) {
+    if (!targets.has(x.target)) targets.set(x.target, []);
+    targets.get(x.target).push(x);
+  }
+  if (r.gscProperty) {
+    L.push(
+      p.proposals.length ? `## ${targets.size} page${targets.size === 1 ? "" : "s"} stuck at positions ${r.range[0]}-${r.range[1]} get ${p.proposals.length} new body link${p.proposals.length === 1 ? "" : "s"}` : `## No new body links this run`,
+      "Each link comes from a page that already ranks on page one for the same topic. Anchors are the target's own queries. Add each link inside the donor's body copy, in or next to the quoted sentence.",
+      ""
+    );
+    if (p.proposals.length) {
+      L.push("| Target page | Position | Impressions | Link from | Anchor | Place near | Authority before \u2192 after |", "|---|---:|---:|---|---|---|---|");
+      for (const x of p.proposals.slice(0, show))
+        L.push(`| ${short(x.target)} | ${x.target_position} | ${fmt(x.target_impressions)} | ${short(x.donor)} (pos ${x.donor_position}) | ${cell(x.anchor)} | \u201C${cell(x.place_near.slice(0, 140))}${x.place_near.length > 140 ? "\u2026" : ""}\u201D | ${x.target_authority_before} \u2192 ${x.target_authority_after} |`);
+      if (p.proposals.length > show) L.push("", `\u2026and ${p.proposals.length - show} more in the CSV.`);
+    } else L.push(p.candidates ? `Pages are sitting at ${r.range[0]}-${r.range[1]}, but no page that already ranks on the same topic has a natural spot for a link. Those pages need content work first.` : `No pages with real impressions are sitting at positions ${r.range[0]}-${r.range[1]} right now.`);
+    if (p.unlinked_candidates.length) L.push("", `${p.unlinked_candidates.length}${p.proposals.length ? " more" : ""} page${p.unlinked_candidates.length === 1 ? "" : "s"} at ${r.range[0]}-${r.range[1]} had no good donor: ${p.unlinked_candidates.slice(0, 8).map(short).join(", ")}.`);
+    L.push("");
+  }
+  L.push(
+    "## Cleanup",
+    `- **${p.redirect_links.length} links point at redirects.** Rewrite each to its final URL at the source.`,
+    `- **${p.broken_links.length} links point at errors** (4xx/5xx).`,
+    `- **${p.generic_anchors.length} body links use generic anchors** ("read more", "click here"). Replace them with words that describe the target.`,
+    `- **${p.mixed_anchors.length} anchors point at more than one URL**, which blurs which page owns the topic.`,
+    `- **${p.orphans.length} sitemap pages have no internal links**${p.prune_or_link.length ? ` (${p.prune_or_link.length} with no search demand either: link them or prune them)` : ""}.`
+  );
+  const ex = [...p.broken_links.slice(0, 5).map((x) => `- Broken: ${short(x.page)} \u2192 ${x.href} (${x.status})`), ...p.redirect_links.slice(0, 5).map((x) => `- Redirect: ${short(x.page)} \u2192 ${x.href} \u2192 ${short(x.final)}`), ...p.orphans.slice(0, 5).map((u) => `- Orphan: ${short(u)}`)];
+  if (ex.length) L.push("", "Examples:", ...ex);
+  if (Object.keys(p.homepage_links).length) L.push("", `Homepage links by zone: ${Object.entries(p.homepage_links).sort().map(([k, v]) => `${k} ${v}`).join(", ")}.`);
+  if (p.leave_alone.length) L.push("", `Leave alone: ${p.leave_alone.length} pages already rank in the top 5 with clicks. Don't rewire their links.`);
+  L.push(
+    "",
+    "Authority is internal PageRank on a 0 to 100 scale (100 = the strongest page). It estimates how link equity flows; Google's own signals aren't public.",
+    `Baseline for measuring: ${r.date}. Re-check the target pages with gsc_performance (page filter) about 4 and 8 weeks after the links go live.`
+  );
+  if (r.files?.length) L.push("", "Files:", ...r.files.map((x) => `- ${x}`));
+  return L.join("\n");
+}
+
+// src/pagespeed.ts
+var GOOGLE_PSI = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
+var FIELD_METRICS = {
+  LARGEST_CONTENTFUL_PAINT_MS: ["LCP", (v) => `${(v / 1e3).toFixed(1)}s`],
+  INTERACTION_TO_NEXT_PAINT: ["INP", (v) => `${v}ms`],
+  CUMULATIVE_LAYOUT_SHIFT_SCORE: ["CLS", (v) => (v / 100).toFixed(2)],
+  FIRST_CONTENTFUL_PAINT_MS: ["FCP", (v) => `${(v / 1e3).toFixed(1)}s`],
+  EXPERIMENTAL_TIME_TO_FIRST_BYTE: ["TTFB", (v) => `${(v / 1e3).toFixed(1)}s`]
+};
+var LAB_METRICS = ["largest-contentful-paint", "total-blocking-time", "cumulative-layout-shift", "first-contentful-paint", "speed-index"];
+function normalizeUrl(input) {
+  const s = input.trim();
+  const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
+  if (!/^https?:$/.test(u.protocol)) throw new Error("Only http(s) URLs can be checked.");
+  if (/^(localhost|127\.|10\.|192\.168\.|\[?::1)/.test(u.hostname)) throw new Error("PageSpeed can only test public URLs.");
+  return u.toString();
+}
+var CACHE_TTL_MS = 30 * 60 * 1e3;
+var cache = /* @__PURE__ */ new Map();
+async function runPsi(url, strategy, opts = {}) {
+  const ck = `${strategy}|${url}`;
+  const hit = cache.get(ck);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.body;
+  const q = new URLSearchParams({ url, strategy });
+  let endpoint = `${opts.apiBase ?? ""}/api/psi`;
+  if (opts.apiKey || !opts.apiBase) {
+    q.set("category", "performance");
+    if (opts.apiKey) q.set("key", opts.apiKey);
+    endpoint = GOOGLE_PSI;
+  }
+  const f = opts.fetchFn ?? fetch;
+  const res = await f(`${endpoint}?${q}`, { headers: { accept: "application/json" } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg2 = body?.error?.message ?? `HTTP ${res.status}`;
+    if (res.status === 429) throw new Error(`PageSpeed quota reached (${msg2}). Try again later, or add your own free PageSpeed Insights API key in the extension settings.`);
+    throw new Error(`PageSpeed Insights failed: ${msg2}`);
+  }
+  if (cache.size > 200) cache.clear();
+  cache.set(ck, { at: Date.now(), body });
+  return body;
+}
+function summarize(raw, strategy) {
+  const lh = raw?.lighthouseResult ?? {};
+  const page = raw?.loadingExperience;
+  const origin = raw?.originLoadingExperience;
+  const hasMetrics = (x) => x?.metrics && Object.keys(x.metrics).length > 0 && x.origin_fallback !== true;
+  const src = hasMetrics(page) ? page : origin?.metrics ? origin : null;
+  const scope = src === page && src ? "page" : src ? "origin" : "none";
+  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt3]]) => ({ name, value: fmt3(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
+  const audits = lh.audits ?? {};
+  const lab = LAB_METRICS.filter((k) => audits[k]?.displayValue).map((k) => ({ name: audits[k].title, value: audits[k].displayValue }));
+  const opportunities = Object.values(audits).filter((a) => a?.details?.type === "opportunity" && (a.details.overallSavingsMs ?? 0) >= 100 && (a.score ?? 1) < 0.9).sort((a, b) => b.details.overallSavingsMs - a.details.overallSavingsMs).slice(0, 5).map((a) => ({ title: a.title, savings: `~${(a.details.overallSavingsMs / 1e3).toFixed(1)}s` }));
+  const score = lh.categories?.performance?.score;
+  return {
+    url: lh.finalDisplayedUrl ?? lh.finalUrl ?? raw?.id ?? "",
+    strategy,
+    performanceScore: typeof score === "number" ? Math.round(score * 100) : null,
+    field: { scope, overall: src?.overall_category ? String(src.overall_category).replace("_", " ").toLowerCase() : null, metrics },
+    lab,
+    opportunities
+  };
+}
+function toMarkdown(results) {
+  const out = [];
+  for (const r of results) {
+    out.push(`## ${r.strategy === "mobile" ? "Mobile" : "Desktop"}: ${r.url}`);
+    out.push(`Lighthouse performance score: **${r.performanceScore ?? "n/a"}/100** (lab test, one run)`);
+    if (r.field.scope === "none") {
+      out.push("Real-user Core Web Vitals: not enough Chrome UX Report traffic for this page or origin yet.");
+    } else {
+      out.push(`Real-user Core Web Vitals (${r.field.scope === "page" ? "this URL" : "whole origin"}, 28-day p75): **${r.field.overall ?? "n/a"}**`);
+      for (const m of r.field.metrics) out.push(`- ${m.name}: ${m.value} (${m.rating})`);
+    }
+    if (r.lab.length) {
+      out.push("Lab metrics:");
+      for (const m of r.lab) out.push(`- ${m.name}: ${m.value}`);
+    }
+    if (r.opportunities.length) {
+      out.push("Biggest opportunities:");
+      for (const o of r.opportunities) out.push(`- ${o.title} (${o.savings})`);
+    }
+    out.push("");
+  }
+  out.push("Field data rates real users; Google uses it for the page experience signal. The lab score is a single simulated run and moves between tests.");
+  out.push("AlchemyAgent Pro tracks this weekly per template and turns it into a ranked fix list: https://alchemyagent.ai");
+  out.push("Data: Google PageSpeed Insights and the Chrome UX Report.");
+  return out.join("\n");
+}
+
+// src/crux.ts
+var METRICS = {
+  largest_contentful_paint: { name: "LCP", good: 2500, poor: 4e3, fmt: (v) => `${(v / 1e3).toFixed(2)}s` },
+  interaction_to_next_paint: { name: "INP", good: 200, poor: 500, fmt: (v) => `${Math.round(v)}ms` },
+  cumulative_layout_shift: { name: "CLS", good: 0.1, poor: 0.25, fmt: (v) => v.toFixed(2) },
+  first_contentful_paint: { name: "FCP", good: 1800, poor: 3e3, fmt: (v) => `${(v / 1e3).toFixed(2)}s` },
+  experimental_time_to_first_byte: { name: "TTFB", good: 800, poor: 1800, fmt: (v) => `${(v / 1e3).toFixed(2)}s` }
+};
+var CRUX_METRICS = Object.keys(METRICS);
+var BARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
+function spark(vals) {
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  return vals.map((v) => BARS[hi === lo ? 3 : Math.round((v - lo) / (hi - lo) * 7)]).join("");
+}
+var rate = (v, m) => v <= m.good ? "good" : v <= m.poor ? "needs improvement" : "poor";
+var ymd = (d) => d ? `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}` : "?";
+function summarizeHistory(rec) {
+  const periods = rec?.collectionPeriods ?? [];
+  const rows = [];
+  for (const [key, m] of Object.entries(METRICS)) {
+    const p75s = rec?.metrics?.[key]?.percentilesTimeseries?.p75s ?? [];
+    const vals = p75s.map((v) => v == null ? NaN : Number(v)).filter((v) => !Number.isNaN(v));
+    if (vals.length < 2) continue;
+    const first = vals[0], latest = vals[vals.length - 1];
+    rows.push({ metric: m.name, first: m.fmt(first), latest: m.fmt(latest), changePct: first ? Math.round((latest - first) / first * 100) : 0, rating: rate(latest, m), spark: spark(vals), points: vals.length });
+  }
+  return { rows, from: ymd(periods[0]?.firstDate), to: ymd(periods[periods.length - 1]?.lastDate) };
+}
+function trendMarkdown(data) {
+  const { rows, from, to } = summarizeHistory(data.record);
+  if (!rows.length) return `Not enough Chrome UX Report history for ${data.key} yet.`;
+  const out = [
+    `## Core Web Vitals trend: ${data.key}`,
+    `${data.scope === "origin" ? "Whole origin" : "This URL"}, ${data.formFactor.toLowerCase()}, 75th percentile of real Chrome users, ${from} to ${to} (weekly, 28-day windows).`,
+    "",
+    "| Metric | Then | Now | Change | Now rated | Trend |",
+    "|---|---|---|---|---|---|",
+    ...rows.map((r) => `| ${r.metric} | ${r.first} | ${r.latest} | ${r.changePct > 0 ? "+" : ""}${r.changePct}% | ${r.rating} | ${r.spark} |`),
+    "",
+    "Lower is better for every metric. A metric passes Core Web Vitals when its p75 is rated good (LCP, INP and CLS are the three that count).",
+    "AlchemyAgent Pro ties these trends to releases and template changes, and alerts you when a metric slips: https://alchemyagent.ai",
+    "Source: Chrome UX Report."
+  ];
   return out.join("\n");
 }
 
@@ -779,10 +1247,10 @@ function bucket(q) {
   if (words2.length >= 7 || words2.length >= 4 && CONVO.test(s) || /[^\x00-\x7f]/.test(s)) return "Candidate";
   return "Ordinary";
 }
-function parseCsv(text) {
+function parseCsv(text2) {
   const rows = [];
   let row = [], field = "", q = false;
-  const t = text.replace(/^﻿/, "");
+  const t = text2.replace(/^﻿/, "");
   for (let i = 0; i < t.length; i++) {
     const c = t[i];
     if (q) {
@@ -811,8 +1279,8 @@ var num = (v) => {
   const n = parseFloat(String(v ?? "").replace(/[,%]/g, "").trim());
   return Number.isFinite(n) ? n : 0;
 };
-function rowsFromCsv(text) {
-  const [head, ...data] = parseCsv(text);
+function rowsFromCsv(text2) {
+  const [head, ...data] = parseCsv(text2);
   if (!head) return [];
   const h = head.map((x) => x.trim().toLowerCase());
   const qi = h.findIndex((x) => ["top queries", "query", "queries"].includes(x));
@@ -911,7 +1379,7 @@ async function get2(f, url, tries = 3) {
   }
   throw new Error(last?.status === 429 ? "The Wayback Machine is rate-limiting requests right now. Try again in a few minutes." : `The Wayback Machine returned ${last?.status}.`);
 }
-var fmt = (ts) => `${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)}`;
+var fmt2 = (ts) => `${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)}`;
 var TRACK = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "PerplexityBot", "Google-Extended", "CCBot", "Applebot-Extended", "Bytespider", "Googlebot"];
 async function robotsHistory(domain, f = fetch, maxFetch = 6) {
   const d = domain.replace(/^www\./, "");
@@ -926,13 +1394,13 @@ async function robotsHistory(domain, f = fetch, maxFetch = 6) {
       const body = await (await get2(f, `https://web.archive.org/web/${ts}id_/https://${d}/robots.txt`, 2)).text();
       if (/<html/i.test(body.slice(0, 300))) return null;
       const robots = parseRobots(body);
-      return { date: fmt(ts), blocked: TRACK.filter((t) => !isAllowed(rulesFor(robots, t).rules, "/").allowed) };
+      return { date: fmt2(ts), blocked: TRACK.filter((t) => !isAllowed(rulesFor(robots, t).rules, "/").allowed) };
     } catch {
       return null;
     }
   }));
   const sampled = results.filter((x) => !!x);
-  return { domain: d, versions: rows.length, sampled, first: fmt(rows[0][0]), last: fmt(rows[rows.length - 1][0]) };
+  return { domain: d, versions: rows.length, sampled, first: fmt2(rows[0][0]), last: fmt2(rows[rows.length - 1][0]) };
 }
 async function pageHistory(url, f = fetch) {
   const r = await get2(f, `${CDX}?url=${encodeURIComponent(url)}&output=json&fl=timestamp,digest&filter=statuscode:200&collapse=timestamp:8&limit=5000`);
@@ -944,7 +1412,7 @@ async function pageHistory(url, f = fetch) {
     if (dg !== prev) changes++;
     prev = dg;
   }
-  return { url, captures: rows.length, first: rows[0] && fmt(rows[0][0]), last: rows.length ? fmt(rows[rows.length - 1][0]) : void 0, byYear, changes: Math.max(0, changes - 1) };
+  return { url, captures: rows.length, first: rows[0] && fmt2(rows[0][0]), last: rows.length ? fmt2(rows[rows.length - 1][0]) : void 0, byYear, changes: Math.max(0, changes - 1) };
 }
 function waybackMarkdown(robots, page) {
   const out = [];
@@ -981,24 +1449,24 @@ var TRACKED_BOTS = TRACK.filter((t) => BOTS.some((b) => b.token === t));
 // src/commoncrawl.ts
 var UA3 = "AlchemyAgent/0.1 (https://alchemyagent.ai; support@alchemyagent.ai)";
 async function getText(f, url, tries = 2, timeoutMs = 12e3) {
-  let status = 0, text = "";
+  let status = 0, text2 = "";
   for (let i = 0; i < tries; i++) {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
       const r = await f(url, { headers: { "user-agent": UA3 }, signal: ctl.signal });
       status = r.status;
-      text = await r.text();
-      if (r.ok || r.status === 404) return { status, text };
+      text2 = await r.text();
+      if (r.ok || r.status === 404) return { status, text: text2 };
     } catch (e) {
       status = 0;
-      text = String(e);
+      text2 = String(e);
     } finally {
       clearTimeout(t);
     }
     if (i < tries - 1) await new Promise((res) => setTimeout(res, 1500));
   }
-  return { status, text };
+  return { status, text: text2 };
 }
 async function commonCrawlCheck(domain, f = fetch, crawls = 3) {
   const d = domain.replace(/^www\./, "").toLowerCase();
@@ -1050,8 +1518,8 @@ function commonCrawlMarkdown(r, ccbotBlocked) {
 
 // src/render.ts
 var BROWSER_UA2 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&[a-z]+;/gi, " ");
-var textOf = (html) => decode(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+var decode2 = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&[a-z]+;/gi, " ");
+var textOf = (html) => decode2(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 var words = (s) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 function frameworks(html) {
   const f = [
@@ -1084,12 +1552,12 @@ async function renderCheck(url, f = fetch) {
   const stripped = html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<(script|style|noscript|template|svg|iframe)\b[\s\S]*?<\/\1>/gi, " ");
   const body = stripped.match(/<body\b[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? stripped;
   const hidden = [...body.matchAll(/<(\w+)\b[^>]*(?:\shidden(?:\s|=|>)|aria-hidden="true"|style="[^"]*display:\s*none)[^>]*>([\s\S]*?)<\/\1>/gi)].map((m) => textOf(m[2])).join(" ");
-  const text = textOf(body);
+  const text2 = textOf(body);
   const main = body.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i);
   const headings = [...body.matchAll(/<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi)].map((m) => ({ level: Number(m[1]), text: textOf(m[2]).slice(0, 120) })).filter((h) => h.text);
   const imgs = [...body.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
-  const attr = (re) => decode(html.match(re)?.[1] ?? "").trim();
-  const w = words(text);
+  const attr = (re) => decode2(html.match(re)?.[1] ?? "").trim();
+  const w = words(text2);
   const fw = frameworks(html);
   const shell = w < 150 && (scriptKb > 50 || /<div[^>]+id=["'](root|app|__next|__nuxt|svelte)["'][^>]*>\s*<\/div>/i.test(html));
   return {
@@ -1116,8 +1584,8 @@ async function renderCheck(url, f = fetch) {
     shell,
     gtm: /googletagmanager\.com\/gtm\.js|GTM-[A-Z0-9]{4,}/.test(html),
     hiddenWords: words(hidden),
-    textRatio: html.length ? text.length / html.length : 0,
-    sample: text.slice(0, 400)
+    textRatio: html.length ? text2.length / html.length : 0,
+    sample: text2.slice(0, 400)
   };
 }
 function renderMarkdown(r) {
@@ -1345,8 +1813,8 @@ async function wikipediaCheck(domain, articleUrl, f = fetch, langs = LANGS) {
     const start = new Date(end);
     start.setUTCDate(1);
     start.setUTCMonth(start.getUTCMonth() - 11);
-    const fmt2 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
-    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt2(start)}/${fmt2(end)}`);
+    const fmt3 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
+    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt3(start)}/${fmt3(end)}`);
     out.pageviews = pv ? { title: decodeURIComponent(m[2]).replace(/_/g, " "), lang: m[1], months: (pv.items ?? []).map((i) => ({ month: String(i.timestamp).slice(0, 6), views: Number(i.views) || 0 })) } : null;
   }
   return out;
@@ -1389,10 +1857,10 @@ async function gdelt(f, params, deadline) {
     const t = setTimeout(() => ctl.abort(), left);
     try {
       const r = await f(`${BASE}?${q}`, { headers: { "user-agent": "AlchemyAgent/0.2 (+https://alchemyagent.ai)" }, signal: ctl.signal });
-      const text = await r.text();
-      if (r.ok && /^\s*\{/.test(text)) return JSON.parse(text);
-      if (r.ok && !text.trim()) return {};
-      if (!(/one every 5 seconds/i.test(text) || r.status === 429)) throw new Error(text.trim().slice(0, 200) || `GDELT returned ${r.status}`);
+      const text2 = await r.text();
+      if (r.ok && /^\s*\{/.test(text2)) return JSON.parse(text2);
+      if (r.ok && !text2.trim()) return {};
+      if (!(/one every 5 seconds/i.test(text2) || r.status === 429)) throw new Error(text2.trim().slice(0, 200) || `GDELT returned ${r.status}`);
     } catch (e) {
       if (!(e instanceof TypeError) && !(e instanceof Error && e.name === "AbortError")) throw e;
     } finally {
@@ -1469,11 +1937,11 @@ var strip = (s) => s.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"').replace(/&#
 async function hackerNews(f, brand, domain) {
   const since = Math.floor(Date.now() / 1e3) - 365 * 86400;
   const q = encodeURIComponent(`"${brand}"`);
-  const [text, links] = await Promise.all([
+  const [text2, links] = await Promise.all([
     json2(f, `https://hn.algolia.com/api/v1/search_by_date?query=${q}&tags=(story,comment)&numericFilters=created_at_i>${since}&hitsPerPage=15`),
     domain ? json2(f, `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(domain)}&restrictSearchableAttributes=url&tags=story&hitsPerPage=20`) : Promise.resolve(null)
   ]);
-  const items = [...text?.hits ?? [], ...(links?.hits ?? []).slice(0, 5)].map((h) => ({
+  const items = [...text2?.hits ?? [], ...(links?.hits ?? []).slice(0, 5)].map((h) => ({
     title: strip(h.title ?? h.story_title ?? (h.comment_text ?? "").slice(0, 120)),
     url: `https://news.ycombinator.com/item?id=${h.objectID}`,
     date: String(h.created_at ?? "").slice(0, 10),
@@ -1483,12 +1951,12 @@ async function hackerNews(f, brand, domain) {
     kind: h._tags?.includes("comment") ? "comment" : "story"
   }));
   const seen = /* @__PURE__ */ new Set();
-  return { mentions: text?.nbHits ?? 0, linking: links?.nbHits ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) };
+  return { mentions: text2?.nbHits ?? 0, linking: links?.nbHits ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) };
 }
 async function stackExchange(f, brand, domain, sites) {
   const out = [];
   for (const site of sites) {
-    const [text, links] = await Promise.all([
+    const [text2, links] = await Promise.all([
       json2(f, `https://api.stackexchange.com/2.3/search/excerpts?order=desc&sort=relevance&q=${encodeURIComponent(`"${brand}"`)}&site=${site}&pagesize=15&filter=total`).catch(() => null),
       domain ? json2(f, `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=votes&url=${encodeURIComponent(`*${domain}*`)}&site=${site}&pagesize=10`).catch(() => null) : Promise.resolve(null)
     ]);
@@ -1503,7 +1971,7 @@ async function stackExchange(f, brand, domain, sites) {
       kind: i.item_type ?? "question"
     }));
     const seen = /* @__PURE__ */ new Set();
-    out.push({ site, mentions: text?.total ?? list?.items?.length ?? 0, linking: links?.items?.length ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) });
+    out.push({ site, mentions: text2?.total ?? list?.items?.length ?? 0, linking: links?.items?.length ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) });
   }
   return out;
 }
@@ -1594,7 +2062,7 @@ function braveMarkdown(domain, rows, country) {
 // src/osm.ts
 var UA7 = "AlchemyAgent/0.2 (https://alchemyagent.ai; support@alchemyagent.ai)";
 var digits = (s = "") => s.replace(/\D/g, "").slice(-10);
-var norm = (s = "") => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim();
+var norm2 = (s = "") => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim();
 var hostOf = (u = "") => {
   try {
     return new URL(/^https?:/i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, "").toLowerCase();
@@ -1624,7 +2092,7 @@ async function osmLookup(name, location, website, phone, f = fetch) {
       phone: tel,
       hours: t.opening_hours,
       checks: {
-        name: !!pname && (norm(pname).includes(norm(name)) || norm(name).includes(norm(pname))),
+        name: !!pname && (norm2(pname).includes(norm2(name)) || norm2(name).includes(norm2(pname))),
         website: website ? site ? hostOf(site) === hostOf(website) : false : null,
         phone: phone ? tel ? digits(tel) === digits(phone) : false : null
       }
@@ -1757,7 +2225,7 @@ function authorityMarkdown(rows, hasOpr) {
 }
 
 // src/prompts.ts
-var msg = (text) => ({ messages: [{ role: "user", content: { type: "text", text } }] });
+var msg = (text2) => ({ messages: [{ role: "user", content: { type: "text", text: text2 } }] });
 var REPORT_RULES = [
   "Report rules:",
   "- Lead with a 3-line summary: what's working, the biggest risk, the single best next step.",
@@ -1918,19 +2386,41 @@ function registerPrompts(server2, remote) {
         "Report: AI-assistant query share and the most telling examples (judge the candidates yourself); top gaining and losing queries and pages vs the previous 28 days; quick wins (queries at position 4-15 with high impressions and low CTR) with the page to improve and what to change."
       ].join("\n"))
     );
+    server2.registerPrompt(
+      "internal_link_rewiring",
+      {
+        title: "Internal link rewiring (Pro)",
+        description: "Move pages stuck at positions 8-15 onto page one with internal links from pages that already rank, then clean up redirects, broken links and generic anchors. Needs AlchemyAgent Pro and Search Console.",
+        argsSchema: { site: external_exports.string().describe("Website, e.g. https://example.com/"), brand_name: external_exports.string().optional().describe("Brand name and common spellings, comma-separated") }
+      },
+      ({ site, brand_name }) => msg([
+        `Plan internal link rewiring for ${site} with AlchemyAgent.`,
+        "",
+        `1. Check data_connections. If Search Console isn't connected, run gsc_connect and wait for me (without it the plan is cleanup only).`,
+        `2. Run internal_links for ${site}${brand_name ? ` with brand_terms ${JSON.stringify(brand_name.split(",").map((x) => x.trim()).filter(Boolean))}` : ""}. It crawls the whole site, so if it says it's still running, call it again with the same site until the plan comes back.`,
+        "3. Sanity-check every proposed link before you show it to me: open the donor page (ai_render_check) and confirm the quoted sentence is real body copy, the anchor reads naturally there, and the donor is on the same topic as the target. Drop any link that fails and say why.",
+        "",
+        "Then give me:",
+        "- A 3-line summary: how many pages are stuck at 8-15, how many links I should add, and the biggest cleanup item.",
+        "- The link list as a table: Target page | Position | Impressions | Add a link on | Anchor | The sentence to put it in (rewrite the sentence so the anchor fits, keeping its meaning).",
+        "- Cleanup, ranked: broken links and links to redirects first (fix each at the source page, not with another redirect), then generic anchors (suggest the replacement wording), then orphan pages (link them or prune them).",
+        "- What to leave alone (pages already in the top 5) and when to measure: re-check the targets with gsc_performance about 4 and 8 weeks after the links go live.",
+        "Don't change anything on the site. Point me to the CSV files for the full lists."
+      ].join("\n"))
+    );
   }
 }
 
 // src/alerts.ts
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { mkdir as mkdir2, readFile, writeFile as writeFile2 } from "node:fs/promises";
+import { homedir as homedir2, platform } from "node:os";
+import { join as join2 } from "node:path";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 var UA8 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-var ALERTS_DIR = () => join(homedir(), ".alchemyagent", "alerts");
+var ALERTS_DIR = () => join2(homedir2(), ".alchemyagent", "alerts");
 var hash = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
-var decode2 = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/<[^>]+>/g, "").trim();
+var decode3 = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/<[^>]+>/g, "").trim();
 var tag = (xml, name) => xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, "i"))?.[1] ?? "";
 var slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "brand";
 var host2 = (u) => {
@@ -1955,23 +2445,23 @@ async function getText2(f, url, ms = 15e3) {
 function parseGoogleNews(xml) {
   return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].map((m) => {
     const it = m[1];
-    const outlet = decode2(tag(it, "source"));
-    const title = decode2(tag(it, "title")).replace(new RegExp(`\\s+-\\s+${outlet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "");
-    const d = Date.parse(decode2(tag(it, "pubDate")));
-    return { source: "Google News", title, url: decode2(tag(it, "link")), outlet: outlet || host2(it.match(/<source[^>]*url="([^"]+)"/i)?.[1] ?? ""), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
+    const outlet = decode3(tag(it, "source"));
+    const title = decode3(tag(it, "title")).replace(new RegExp(`\\s+-\\s+${outlet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "");
+    const d = Date.parse(decode3(tag(it, "pubDate")));
+    return { source: "Google News", title, url: decode3(tag(it, "link")), outlet: outlet || host2(it.match(/<source[^>]*url="([^"]+)"/i)?.[1] ?? ""), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
   });
 }
 function parseGoogleAlerts(xml) {
   return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((m) => {
     const e = m[1];
-    const raw = decode2(e.match(/<link[^>]*href="([^"]+)"/i)?.[1] ?? "");
+    const raw = decode3(e.match(/<link[^>]*href="([^"]+)"/i)?.[1] ?? "");
     let url = raw;
     try {
       url = new URL(raw).searchParams.get("url") ?? raw;
     } catch {
     }
-    const d = Date.parse(decode2(tag(e, "published")) || decode2(tag(e, "updated")));
-    return { source: "Google Alerts", title: decode2(tag(e, "title")), url, outlet: host2(url), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
+    const d = Date.parse(decode3(tag(e, "published")) || decode3(tag(e, "updated")));
+    return { source: "Google Alerts", title: decode3(tag(e, "title")), url, outlet: host2(url), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
   });
 }
 async function linksTo(f, url, domain) {
@@ -1983,15 +2473,15 @@ async function linksTo(f, url, domain) {
 }
 async function loadState(brand) {
   try {
-    return JSON.parse(await readFile(join(ALERTS_DIR(), `${slug(brand)}.json`), "utf8"));
+    return JSON.parse(await readFile(join2(ALERTS_DIR(), `${slug(brand)}.json`), "utf8"));
   } catch {
     return { brand, feeds: [], seen: {} };
   }
 }
 async function saveState(s) {
-  await mkdir(ALERTS_DIR(), { recursive: true, mode: 448 });
+  await mkdir2(ALERTS_DIR(), { recursive: true, mode: 448 });
   const entries = Object.entries(s.seen).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 5e3);
-  await writeFile(join(ALERTS_DIR(), `${slug(s.brand)}.json`), JSON.stringify({ ...s, seen: Object.fromEntries(entries) }, null, 2), { mode: 384 });
+  await writeFile2(join2(ALERTS_DIR(), `${slug(s.brand)}.json`), JSON.stringify({ ...s, seen: Object.fromEntries(entries) }, null, 2), { mode: 384 });
 }
 async function checkAlerts(opts, f = fetch) {
   const state = await loadState(opts.brand);
@@ -2047,9 +2537,9 @@ async function checkAlerts(opts, f = fetch) {
 }
 function notifyDesktop(title, body) {
   if (platform() !== "darwin") return;
-  const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
+  const esc2 = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
   try {
-    spawn("osascript", ["-e", `display notification "${esc(body)}" with title "${esc(title)}"`], { stdio: "ignore", detached: true }).unref();
+    spawn("osascript", ["-e", `display notification "${esc2(body)}" with title "${esc2(title)}"`], { stdio: "ignore", detached: true }).unref();
   } catch {
   }
 }
@@ -2106,7 +2596,7 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.3.10";
+var VERSION = "0.3.11";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer(opts = {}) {
@@ -2231,14 +2721,14 @@ function createServer(opts = {}) {
     },
     async ({ csv_path, csv_text }) => {
       try {
-        let text = csv_text;
-        if (!text && csv_path && opts.remote) throw new Error("This hosted version can't read files. Paste the contents of Queries.csv as csv_text.");
-        if (!text && csv_path) {
+        let text2 = csv_text;
+        if (!text2 && csv_path && opts.remote) throw new Error("This hosted version can't read files. Paste the contents of Queries.csv as csv_text.");
+        if (!text2 && csv_path) {
           const { readFile: readFile2 } = await import("node:fs/promises");
-          text = await readFile2(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
+          text2 = await readFile2(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
         }
-        if (!text) throw new Error("Pass csv_path (the Queries.csv from a Search Console export) or csv_text.");
-        const rows = rowsFromCsv(text);
+        if (!text2) throw new Error("Pass csv_path (the Queries.csv from a Search Console export) or csv_text.");
+        const rows = rowsFromCsv(text2);
         if (!rows.length) throw new Error("No query rows found in that CSV.");
         return { content: [{ type: "text", text: classifyMarkdown(classify(rows)) }] };
       } catch (e) {
@@ -2270,7 +2760,7 @@ function createServer(opts = {}) {
     }
   );
   const ro = { readOnlyHint: true, openWorldHint: true };
-  const run = (fn) => fn().then((text) => ({ content: [{ type: "text", text }] }), errorResult);
+  const run = (fn) => fn().then((text2) => ({ content: [{ type: "text", text: text2 }] }), errorResult);
   register(
     "ai_render_check",
     {
@@ -2620,8 +3110,8 @@ ${md}`;
       async (a) => {
         try {
           const r = await renderFeatured({ headline: a.headline, subhead: a.subhead, eyebrow: a.eyebrow, source: a.source, site: a.site, brand: a.brand, logoSvg: a.logo_svg, background: a.background, ink: a.ink, accent: a.accent, headingFont: a.heading_font, bodyFont: a.body_font, card: a.card }, a.out_dir, a.file_name ?? a.headline, a.credit !== false);
-          const text = [r.png ? `Saved ${r.png} (2400x1260) and its source ${r.html}.` : `Wrote ${r.html}.`, r.note ?? "", a.credit !== false && r.png ? `The PNG's metadata includes an invisible credit ("Created with AlchemyAgent"); nothing is drawn on the image. Pass credit: false to leave it out.` : "", "Upload it as the post's featured image (most SEO plugins also use it as og:image) and write alt text that states what the chart shows, with the numbers."].filter(Boolean).join("\n");
-          const content = [{ type: "text", text }];
+          const text2 = [r.png ? `Saved ${r.png} (2400x1260) and its source ${r.html}.` : `Wrote ${r.html}.`, r.note ?? "", a.credit !== false && r.png ? `The PNG's metadata includes an invisible credit ("Created with AlchemyAgent"); nothing is drawn on the image. Pass credit: false to leave it out.` : "", "Upload it as the post's featured image (most SEO plugins also use it as og:image) and write alt text that states what the chart shows, with the numbers."].filter(Boolean).join("\n");
+          const content = [{ type: "text", text: text2 }];
           if (r.png) content.push({ type: "image", data: (await (await import("node:fs/promises")).readFile(r.png)).toString("base64"), mimeType: "image/png" });
           return { content };
         } catch (e) {
@@ -2663,8 +3153,8 @@ ${md}`;
       async ({ url, json_path, max_issues }) => {
         try {
           if (!url && !json_path) throw new Error("Give a url (e.g. example.com) or a json_path to a local entitymap.json.");
-          const text = json_path ? await (await import("node:fs/promises")).readFile(json_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8") : void 0;
-          const r = await entitymapCheck(url ?? "", f, text);
+          const text2 = json_path ? await (await import("node:fs/promises")).readFile(json_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8") : void 0;
+          const r = await entitymapCheck(url ?? "", f, text2);
           if (json_path && !url) r.jsonUrl = json_path;
           return { content: [{ type: "text", text: entitymapMarkdown(r, max_issues) }] };
         } catch (e) {
@@ -2718,6 +3208,89 @@ ${md}`;
           return errorResult(e);
         }
       }
+    );
+    const linkJobs = /* @__PURE__ */ new Map();
+    register(
+      "internal_links",
+      {
+        title: "Internal link rewiring plan (Pro)",
+        description: "AlchemyAgent Pro: plan internal links that move pages stuck at positions 8 to 15 in Google onto page one, without new content. Crawls every page in the site's sitemap from the user's computer, maps every internal link (body, nav, footer, template) and its anchor, scores internal authority (PageRank), then reads the user's own Search Console: each page sitting at positions 8-15 with real non-brand impressions gets up to 3 new body links from pages that already rank on page one for the same topic, with an anchor taken from its own queries and the sentence in the donor page where the link fits. Also lists cleanup: links to redirects and broken pages, generic anchors, one anchor pointing at several URLs, and orphan pages. Plan only: it never changes the site. Large sites take a few minutes: if the result says it's still running, call it again with the same site.",
+        inputSchema: {
+          site: external_exports.string().describe("Website, e.g. https://example.com/ (it should also be a Search Console property for the full plan)"),
+          brand_terms: external_exports.array(external_exports.string()).max(10).optional().describe('Brand names and spellings to leave out of topic matching, e.g. ["acme", "acme widgets"]. Defaults to the domain name.'),
+          days: external_exports.number().int().min(28).max(480).default(90).describe("Search Console period"),
+          max_pages: external_exports.number().int().min(10).max(3e3).default(1e3).describe("Most sitemap pages to crawl"),
+          position_min: external_exports.number().min(1).max(50).default(8),
+          position_max: external_exports.number().min(1).max(100).default(15),
+          min_impressions: external_exports.number().int().min(0).default(100).describe("Non-brand impressions a page needs to be a target"),
+          donors_per_page: external_exports.number().int().min(1).max(5).default(3),
+          refresh: external_exports.boolean().default(false).describe("Start a new run even if one finished in the last 12 hours"),
+          out_dir: external_exports.string().optional().describe("Folder for the CSV, JSON and Markdown files (default ~/Downloads/alchemyagent-reports)")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async (a) => run(async () => {
+        if (!opts.licenseKey) throw new Error(LINKS_PRO_HELP);
+        const base = new URL(normalizeUrl(a.site)).origin + "/";
+        const key = norm(base);
+        let job = linkJobs.get(key);
+        const fresh = job?.result && Date.now() - job.started < 12 * 36e5;
+        if (!job || job.error || a.refresh && job.result || job.result && !fresh) {
+          const v = await verifyPro(f, apiBase, opts.licenseKey, "internal_links");
+          let gsc = null, gscProperty;
+          if (gscCreds.serviceAccountFile || gscCreds.clientId && gscCreds.clientSecret) {
+            try {
+              gscProperty = await property(a.site);
+              const range = dateRange(a.days);
+              const [pg, pq] = await Promise.all([
+                searchAnalytics(gscCreds, gscProperty, { ...range, dimensions: ["page"], rowLimit: 25e3 }, f),
+                searchAnalytics(gscCreds, gscProperty, { ...range, dimensions: ["page", "query"], rowLimit: 1e5 }, f)
+              ]);
+              gsc = {
+                pages: Object.fromEntries(pg.map((r) => [norm(r.keys[0]), { clicks: r.clicks, impressions: r.impressions, position: Math.round(r.position * 10) / 10 }])),
+                pq: pq.map((r) => [norm(r.keys[0]), r.keys[1], r.clicks, r.impressions, Math.round(r.position * 10) / 10])
+              };
+            } catch (e) {
+              gsc = null;
+              gscProperty = void 0;
+              if (!/isn't a Search Console property|sign in|connect/i.test(String(e))) throw e;
+            }
+          }
+          const host3 = new URL(base).hostname.replace(/^www\./, "");
+          const progress = { phase: "starting", done: 0, total: 0 };
+          const j = { started: Date.now(), progress, promise: Promise.resolve(null) };
+          j.promise = runLinks({
+            base,
+            f,
+            maxPages: a.max_pages,
+            gsc,
+            gscProperty,
+            progress,
+            plan: { posMin: a.position_min, posMax: a.position_max, minImpressions: a.min_impressions, donorsPer: a.donors_per_page, brand: a.brand_terms?.length ? a.brand_terms : [host3.split(".")[0]] }
+          }).then(async (r) => {
+            const md0 = linksMarkdown(r);
+            r.files = await saveLinkFiles(r, md0, a.out_dir).catch(() => void 0);
+            j.result = r;
+            j.md = linksMarkdown(r) + `
+
+AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
+            return r;
+          }, (e) => {
+            j.error = e instanceof Error ? e.message : String(e);
+            throw e;
+          });
+          j.promise.catch(() => {
+          });
+          linkJobs.set(key, j);
+          job = j;
+        }
+        await Promise.race([job.promise.catch(() => {
+        }), new Promise((r) => setTimeout(r, 4e4))]);
+        if (job.error) throw new Error(job.error);
+        if (job.md) return job.md;
+        const pr = job.progress;
+        return `Still running (${Math.round((Date.now() - job.started) / 1e3)} s so far): ${pr.phase}${pr.total ? ` ${pr.done} of ${pr.total}` : ""}. Call internal_links again with the same site in about a minute to get the plan.`;
+      })
     );
     register(
       "bing_webmaster",
