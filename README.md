@@ -58,4 +58,6 @@ Saved on your computer: the Google refresh token (`~/.alchemyagent/google-token.
 
 Checks run on your computer. A few use AlchemyAgent's free API (api.alchemyagent.ai) for PageSpeed, Chrome UX Report, Mozilla Observatory and Wikidata lookups: we receive the website you ask about, and cache public-site results for up to 12 hours. See the [privacy policy](https://alchemyleads.com/privacy-policy/#alchemyagent-free-tools).
 
+Usage statistics (0.5.1+): after each tool runs, the plugin sends api.alchemyagent.ai a random install ID (created on your computer in `~/.alchemyagent/install-id`), the plugin version, whether it's Claude Desktop or Claude Code, the tool name and whether it worked. It never sends the websites you check, what you ask, your keys or any results, and no IP address is stored with it. Turn it off with the **Send anonymous usage statistics** setting, or set `DO_NOT_TRACK=1`; then nothing is sent and no install ID is created.
+
 Support: support@alchemyagent.ai

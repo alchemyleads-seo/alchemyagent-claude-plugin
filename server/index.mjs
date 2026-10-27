@@ -1,5 +1,6 @@
 // AlchemyAgent for Claude. (c) AlchemyLeads. https://alchemyagent.ai
 import {
+  ACCOUNT_NEEDED,
   BING_KEY_HELP,
   BOTS,
   CF_TOKEN_HELP,
@@ -7,17 +8,24 @@ import {
   TOKEN_FILE,
   bingMarkdown,
   bingReport,
+  challenged,
   connState,
   connectionStatus,
   connectionsMarkdown,
+  crawlerCheck,
+  crawlerMarkdown,
   dateRange,
   entitymapCheck,
   entitymapMarkdown,
   ga4Markdown,
   ga4Report,
+  get,
   hasScope,
+  hostedConnectionsMarkdown,
   imageAudit,
   imageMarkdown,
+  isAllowed,
+  linksMarkdown,
   listProperties,
   listSites,
   listSites2,
@@ -26,13 +34,18 @@ import {
   matchGa4,
   matchProperty,
   matchSite,
+  norm,
+  parseRobots,
   propertiesMarkdown,
   renderFeatured,
   rowsMarkdown,
+  rulesFor,
+  runLinks,
+  saveLinkFiles,
   searchAnalytics,
   sitesMarkdown,
   startConnect
-} from "./chunks/chunk-OFQYJPIG.mjs";
+} from "./chunks/chunk-AX4KF6ZD.mjs";
 import {
   JSONRPCMessageSchema,
   McpServer
@@ -160,8 +173,8 @@ var StdioServerTransport = class {
 // src/quality.ts
 var PRO_HELP = "Page quality rating is part of AlchemyAgent Pro: each page is rated 1 to 9 against our private rubric (built from the concepts in Google's public Search Quality Rater Guidelines), with quoted evidence and a specific fix. Add your Pro license key in the AlchemyAgent settings (Claude Desktop: Settings > Extensions > AlchemyAgent > Configure; Claude Code: /plugin, then AlchemyAgent's settings). Get Pro: https://alchemyagent.ai/#pro";
 var LINKS_PRO_HELP = "Internal link rewiring is part of AlchemyAgent Pro: it crawls your site from your computer, reads your own Search Console, and plans the body links that move pages stuck at positions 8 to 15 onto page one. Add your Pro license key in the AlchemyAgent settings (Claude Desktop: Settings > Extensions > AlchemyAgent > Configure; Claude Code: /plugin, then AlchemyAgent's settings). Get Pro: https://alchemyagent.ai/#pro";
-async function verifyPro(f, apiBase, licenseKey, feature) {
-  const r = await f(`${apiBase}/api/pro/verify`, { method: "POST", headers: { authorization: `Bearer ${licenseKey}`, "content-type": "application/json", "user-agent": "AlchemyAgent-MCP" }, body: JSON.stringify({ feature }) });
+async function verifyPro(f, apiBase2, licenseKey, feature) {
+  const r = await f(`${apiBase2}/api/pro/verify`, { method: "POST", headers: { authorization: `Bearer ${licenseKey}`, "content-type": "application/json", "user-agent": "AlchemyAgent-MCP" }, body: JSON.stringify({ feature }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error?.message || `AlchemyAgent license check failed (${r.status})`);
   return j;
@@ -176,9 +189,9 @@ async function fetchPage(f, url) {
     return void 0;
   }
 }
-async function rateQuality(f, apiBase, licenseKey, url, context) {
+async function rateQuality(f, apiBase2, licenseKey, url, context) {
   const html = await fetchPage(f, url);
-  const r = await f(`${apiBase}/api/quality`, {
+  const r = await f(`${apiBase2}/api/quality`, {
     method: "POST",
     headers: { authorization: `Bearer ${licenseKey}`, "content-type": "application/json", "user-agent": "AlchemyAgent-MCP" },
     body: JSON.stringify({ url, context, html })
@@ -245,6 +258,7 @@ var SETUP_HELP = `Set up tracking once (tracking_setup) and every AlchemyAgent a
 - ai_tracking: tier 25 | 50 | 100, cadence weekly | monthly, engines, clusters of prompts written the way buyers ask AI`;
 var CITED = /* @__PURE__ */ new Set(["references", "sources", "annotations", "citations"]);
 var SKIP_TEXT = /* @__PURE__ */ new Set([...CITED, "search_results", "fan_out_queries", "check_url", "url", "domain", "brand_entities"]);
+var siteUrl = (p) => p.site_url || (p.site ? `https://${p.site}` : "");
 function summarizeAi(rows, engines, competitors, brands) {
   const by_engine = {};
   for (const e of engines) {
@@ -302,8 +316,8 @@ function aiMarkdown(site, date, rows, s, engines, prev, tier) {
     "| Prompt | " + engines.map((e) => ENGINE_LABEL[e]).join(" | ") + " |",
     "|---|" + engines.map(() => "---|").join("")
   );
-  const cell2 = (x) => !x ? "?" : !x.answered ? "\u2013" : (x.mentioned ? "M" : "") + (x.cited ? "C" : "") || "\xB7";
-  for (const r of rows) L.push(`| ${r.prompt.replace(/\|/g, "/")} | ` + engines.map((e) => cell2(r.engines[e])).join(" | ") + " |");
+  const cell = (x) => !x ? "?" : !x.answered ? "\u2013" : (x.mentioned ? "M" : "") + (x.cited ? "C" : "") || "\xB7";
+  for (const r of rows) L.push(`| ${r.prompt.replace(/\|/g, "/")} | ` + engines.map((e) => cell(r.engines[e])).join(" | ") + " |");
   L.push("", "M = brand mentioned, C = site cited as a source, \u2013 = the engine showed no AI answer. Data: DataForSEO (Google SERP and AI Mode, ChatGPT and Gemini as users see them, Perplexity Sonar and Claude with web search).");
   return L.join("\n");
 }
@@ -456,7 +470,7 @@ async function setupMarkdown(api, patch) {
 
 ${SETUP_HELP}`;
   const errs = profileErrors(p, ["rank", "ai"]);
-  return [`# Tracking setup: ${p.site}`, "", "```json", JSON.stringify(p, null, 2), "```", ...errs.length ? ["", "Missing:", ...errs.map((e) => `- ${e}`)] : []].join("\n");
+  return [`# Tracking setup: ${siteUrl(p)}`, "", "```json", JSON.stringify(p, null, 2), "```", ...errs.length ? ["", "Missing:", ...errs.map((e) => `- ${e}`)] : []].join("\n");
 }
 async function runAiVisibility(api, o) {
   const p = await api.profile();
@@ -485,7 +499,7 @@ async function runAiVisibility(api, o) {
   if (!o.cluster && !o.limit) await api.call("history", { kind: "ai", date: today(), summary: s }).catch(() => {
   });
   const targets = citationTargets(rows, p.site, comps, brands);
-  let md = aiMarkdown(p.site, today(), rows, s, engines, prev, p.ai_tracking.tier);
+  let md = aiMarkdown(siteUrl(p), today(), rows, s, engines, prev, p.ai_tracking.tier);
   if (targets.length) md += "\n\n## Citation outreach\nPages AI cites where you're not mentioned (pitch for inclusion, claim or improve the profile, or join the thread):\n\n| Page | Type | Times cited | Engines |\n|---|---|---:|---|\n" + targets.slice(0, 20).map((t) => `| ${t.url} | ${t.type} | ${t.times_cited} | ${t.engines} |`).join("\n");
   md += `
 
@@ -511,7 +525,7 @@ async function runRanks(api, o = {}) {
   await api.call("history", { kind: "rank", date: today(), summary: Object.fromEntries(rows.map((r) => [r.label, r.position])) }).catch(() => {
   });
   const comps = p.competitors;
-  return { markdown: rankMarkdown(p.site, today(), rows, comps, 20, hist.length ? hist[hist.length - 1].summary : null), exports: [{ name: `rankings-${today()}.csv`, csv: rankCsv(rows, comps) }] };
+  return { markdown: rankMarkdown(siteUrl(p), today(), rows, comps, 20, hist.length ? hist[hist.length - 1].summary : null), exports: [{ name: `rankings-${today()}.csv`, csv: rankCsv(rows, comps) }] };
 }
 async function runGaps(api, o = {}) {
   const r = await api.call("keyword-gaps", { competitors: o.competitors, top: o.top });
@@ -569,702 +583,6 @@ async function runResearch(api, o) {
   return { markdown: L.join("\n"), exports: [{ name: `keyword-research-${today()}.csv`, csv: kwCsv(r.rows) }] };
 }
 
-// src/links.ts
-import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join, resolve as resolvePath } from "node:path";
-
-// src/robots.ts
-function parseRobots(txt) {
-  const groups = [];
-  const sitemaps = [];
-  let cur = null;
-  let lastWasAgent = false;
-  for (const raw of txt.split(/\r?\n/)) {
-    const line = raw.replace(/#.*/, "").trim();
-    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1].toLowerCase();
-    const val = m[2].trim();
-    if (key === "user-agent") {
-      if (!cur || !lastWasAgent) groups.push(cur = { agents: [], rules: [] });
-      cur.agents.push(val.toLowerCase());
-      lastWasAgent = true;
-    } else if (key === "allow" || key === "disallow") {
-      lastWasAgent = false;
-      if (cur && val) cur.rules.push({ allow: key === "allow", path: val });
-    } else if (key === "sitemap") {
-      if (val) sitemaps.push(val);
-    } else {
-      lastWasAgent = false;
-    }
-  }
-  return { groups, sitemaps };
-}
-function rulesFor(robots, token) {
-  const t = token.toLowerCase();
-  const own = robots.groups.filter((g) => g.agents.includes(t));
-  if (own.length) return { rules: own.flatMap((g) => g.rules), matched: "specific" };
-  const star = robots.groups.filter((g) => g.agents.includes("*"));
-  return { rules: star.flatMap((g) => g.rules), matched: star.length ? "wildcard" : "none" };
-}
-function toRegex(pattern) {
-  const anchored = pattern.endsWith("$");
-  const body = (anchored ? pattern.slice(0, -1) : pattern).replace(/[.+?^{}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-  return new RegExp("^" + body + (anchored ? "$" : ""));
-}
-function isAllowed(rules, path) {
-  if (path === "/robots.txt") return { allowed: true };
-  let best;
-  for (const r of rules) {
-    if (!toRegex(r.path).test(path)) continue;
-    if (!best || r.path.length > best.path.length || r.path.length === best.path.length && r.allow && !best.allow) best = r;
-  }
-  return { allowed: best ? best.allow : true, rule: best };
-}
-
-// src/aiprefs.ts
-var UA = "AlchemyAgent-Check/0.1 (+https://alchemyagent.ai)";
-function kv(s) {
-  const out = {};
-  for (const part of s.split(/[,;]/)) {
-    const m = part.trim().match(/^([\w-]+)\s*=\s*([\w-]+)/);
-    if (m) out[m[1].toLowerCase()] = m[2].toLowerCase();
-  }
-  return out;
-}
-function parseRobotsPrefs(txt) {
-  const contentSignals = [];
-  const contentUsage = [];
-  let agents = [];
-  let lastWasAgent = false;
-  for (const raw of txt.split(/\r?\n/)) {
-    const line = raw.replace(/#.*/, "").trim();
-    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1].toLowerCase();
-    if (key === "user-agent") {
-      agents = lastWasAgent ? [...agents, m[2]] : [m[2]];
-      lastWasAgent = true;
-      continue;
-    }
-    lastWasAgent = false;
-    const who = agents.length ? agents.join(", ") : "all";
-    if (key === "content-signal") contentSignals.push({ agents: who, signals: kv(m[2]) });
-    if (key === "content-usage") contentUsage.push({ where: `robots.txt (${who})`, value: m[2].trim() });
-  }
-  return { contentSignals, contentUsage };
-}
-async function aiPrefsCheck(origin, robotsText, page, f = fetch) {
-  const fromRobots = robotsText ? parseRobotsPrefs(robotsText) : { contentSignals: [], contentUsage: [] };
-  const h = page?.headers;
-  const html = page?.text ?? "";
-  const meta = (name) => html.match(new RegExp(`<meta\\b[^>]*name=["']${name}["'][^>]*content=["']([^"']*)["']`, "i"))?.[1];
-  const noai = [];
-  const xr = h?.get("x-robots-tag") ?? "";
-  if (/\bnoai\b|\bnoimageai\b/i.test(xr)) noai.push(`X-Robots-Tag: ${xr}`);
-  for (const m of html.matchAll(/<meta\b[^>]*name=["'](robots|[\w-]*bot)["'][^>]*content=["']([^"']*)["']/gi)) if (/\bnoai\b|\bnoimageai\b/i.test(m[2])) noai.push(`<meta name="${m[1]}" content="${m[2]}">`);
-  const cu = h?.get("content-usage");
-  const [tdmJson, aiTxt] = await Promise.all([
-    get(f, `${origin}/.well-known/tdmrep.json`, UA, 8e3),
-    get(f, `${origin}/ai.txt`, UA, 8e3)
-  ]);
-  const real = (r) => challenged(r) ? null : r.status === 200 && !/<html/i.test(r.text.slice(0, 300));
-  return {
-    contentSignals: fromRobots.contentSignals,
-    contentUsage: [...fromRobots.contentUsage, ...cu ? [{ where: "HTTP header", value: cu }] : []],
-    tdm: { header: h?.get("tdm-reservation") ?? void 0, meta: meta("tdm-reservation"), wellKnown: real(tdmJson) },
-    noai,
-    aiTxt: real(aiTxt)
-  };
-}
-var SIGNAL_MEANING = {
-  search: "building a search index and showing links/snippets",
-  "ai-input": "using content as input to AI answers (RAG, grounding, AI Overviews)",
-  "ai-train": "training or fine-tuning AI models"
-};
-function aiPrefsMarkdown(p) {
-  const L = ["### AI usage preferences (beyond allow/disallow)"];
-  const any = p.contentSignals.length || p.contentUsage.length || p.tdm.header || p.tdm.meta || p.tdm.wellKnown || p.noai.length || p.aiTxt;
-  for (const c of p.contentSignals) {
-    const parts = Object.entries(c.signals).map(([k, v]) => `${k}=${v}${SIGNAL_MEANING[k] ? ` (${SIGNAL_MEANING[k]})` : ""}`);
-    L.push(`- Content-Signal for ${c.agents}: ${parts.join("; ") || "(empty)"}`);
-    if (c.signals["ai-input"] === "no") L.push("  - ai-input=no asks AI tools not to use your pages in answers. If you want to be cited in AI search, that works against you.");
-  }
-  for (const c of p.contentUsage) L.push(`- Content-Usage (IETF AI Preferences draft) in ${c.where}: \`${c.value}\``);
-  if (p.tdm.header || p.tdm.meta) L.push(`- TDMRep reservation: ${[p.tdm.header && `header tdm-reservation: ${p.tdm.header}`, p.tdm.meta && `meta tdm-reservation=${p.tdm.meta}`].filter(Boolean).join(", ")} (text-and-data-mining rights reserved, EU DSM Article 4).`);
-  if (p.tdm.wellKnown) L.push("- /.well-known/tdmrep.json is published (W3C TDMRep policy file).");
-  if (p.noai.length) L.push(`- "noai" directives: ${p.noai.join("; ")}. Few crawlers honor these; robots.txt and Content-Signal are more widely read.`);
-  if (p.aiTxt) L.push("- /ai.txt is present (Spawning's AI-training opt-out file).");
-  if (!any) {
-    L.push("- None found. The site says nothing machine-readable about AI use beyond robots.txt.");
-    L.push("- Optional: add a Cloudflare-style line to robots.txt to state your intent, e.g. `Content-Signal: search=yes, ai-input=yes, ai-train=no` (be cited in AI answers, opt out of training). These are preferences, not access controls.");
-  }
-  return L.join("\n");
-}
-
-// src/crawler.ts
-var OUR_UA = "AlchemyAgent-Check/0.1 (+https://alchemyagent.ai)";
-var BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-async function get(f, url, ua, ms = 15e3) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), ms);
-  try {
-    const r = await f(url, { headers: { "user-agent": ua, accept: "text/html,*/*" }, redirect: "follow", signal: ctl.signal });
-    const text2 = await r.text().catch(() => "");
-    return { status: r.status, headers: r.headers, text: text2, url: r.url || url };
-  } catch (e) {
-    return { status: 0, headers: new Headers(), text: "", url, error: e instanceof Error ? e.message : String(e) };
-  } finally {
-    clearTimeout(t);
-  }
-}
-function challenged(res) {
-  return res.headers.get("cf-mitigated") === "challenge" || /<title>\s*Just a moment/i.test(res.text) || /captcha|access denied/i.test(res.text.slice(0, 3e3));
-}
-function metaRobots(html) {
-  const out = [];
-  for (const m of html.matchAll(/<meta\b[^>]*>/gi)) {
-    const tag2 = m[0];
-    const name = tag2.match(/\bname\s*=\s*["']?([^"'\s>]+)/i)?.[1]?.toLowerCase();
-    const content = tag2.match(/\bcontent\s*=\s*["']([^"']*)["']/i)?.[1];
-    if (name && content != null && (name === "robots" || BOTS.some((b) => b.token.toLowerCase() === name))) out.push({ name, content: content.toLowerCase() });
-  }
-  return out;
-}
-async function crawlerCheck(input, f = fetch, ipCounts = {}) {
-  const target = new URL(input);
-  const origin = target.origin;
-  const path = target.pathname + target.search;
-  const robotsRes = await get(f, `${origin}/robots.txt`, OUR_UA);
-  const robotsChallenged = challenged(robotsRes) || robotsRes.status === 200 && /<html/i.test(robotsRes.text.slice(0, 500));
-  const robotsNote = robotsChallenged ? "could not be read (the site's firewall answered with a challenge page instead), so per-bot rules below are unknown" : robotsRes.status === 200 ? "found" : robotsRes.status >= 500 ? `returned ${robotsRes.status}; Google treats a 5xx robots.txt as "block everything" until it recovers` : robotsRes.status === 0 ? `could not be fetched (${robotsRes.error})` : `returned ${robotsRes.status}, so crawlers treat the whole site as allowed`;
-  const robots = parseRobots(robotsRes.status === 200 && !robotsChallenged ? robotsRes.text : "");
-  const serverBlocksAll = robotsRes.status >= 500;
-  const page = await get(f, target.toString(), BROWSER_UA);
-  const baselineBlocked = page.status !== 200 || challenged(page);
-  const xRobots = baselineBlocked ? "" : page.headers.get("x-robots-tag") ?? "";
-  const metas = baselineBlocked ? [] : metaRobots(page.text);
-  const rows = BOTS.map((b) => {
-    const { rules, matched } = rulesFor(robots, b.token);
-    const verdict = isAllowed(rules, path);
-    return {
-      token: b.token,
-      owner: b.owner,
-      purpose: b.purpose,
-      robots: robotsChallenged ? "unknown" : serverBlocksAll || !verdict.allowed ? "blocked" : "allowed",
-      robotsRule: verdict.rule ? `${verdict.rule.allow ? "Allow" : "Disallow"}: ${verdict.rule.path}` : void 0,
-      matched,
-      ipList: b.ipList ? ipCounts[b.token] ? `${ipCounts[b.token]} ranges` : "published" : void 0
-    };
-  });
-  const probeBots = baselineBlocked ? [] : BOTS.filter((b) => !!b.ua);
-  for (let i = 0; i < probeBots.length; i += 3) {
-    await Promise.all(probeBots.slice(i, i + 3).map(async (b) => {
-      const r = await get(f, target.toString(), b.ua);
-      const row = rows.find((x) => x.token === b.token);
-      row.probe = r.status === 0 ? "no response" : challenged(r) ? `${r.status} challenge` : r.status === page.status ? `${r.status} same as browser` : `${r.status} (browser got ${page.status})`;
-    }));
-  }
-  const sitemapUrls2 = robots.sitemaps.length ? robots.sitemaps.slice(0, 5) : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
-  const sitemaps = await Promise.all(sitemapUrls2.map(async (u) => {
-    const r = await get(f, u, OUR_UA);
-    return { url: u, status: r.status, challenged: challenged(r), listed: robots.sitemaps.includes(u) };
-  }));
-  const llms = await get(f, `${origin}/llms.txt`, OUR_UA);
-  const llmsTxt = challenged(llms) ? "unknown" : llms.status === 200 && !/<html/i.test(llms.text.slice(0, 500)) ? "present" : "missing";
-  const aiPrefs = await aiPrefsCheck(origin, robotsRes.status === 200 && !robotsChallenged ? robotsRes.text : null, baselineBlocked ? null : page, f);
-  return { aiPrefs, origin, path, robotsStatus: robotsRes.status, robotsNote, pageStatus: page.status, baselineBlocked, pageChallenged: challenged(page), xRobots, metas, rows, sitemaps, llmsTxt };
-}
-function crawlerMarkdown(r, from = "your machine") {
-  const blocked = r.rows.filter((x) => x.robots === "blocked");
-  const probeIssues = r.rows.filter((x) => x.probe && !/same as browser/.test(x.probe));
-  const pageDirectives = [r.xRobots && `X-Robots-Tag: ${r.xRobots}`, ...r.metas.map((m) => `<meta name="${m.name}" content="${m.content}">`)].filter(Boolean);
-  const noindex = pageDirectives.some((d) => /noindex|none/.test(d));
-  const out = [
-    `## AI crawler access: ${r.origin}${r.path}`,
-    `robots.txt ${r.robotsNote}. ${r.baselineBlocked ? `The page answered our plain check with ${r.pageStatus}${r.pageChallenged ? " and a firewall challenge" : ""}.` : `Page returned ${r.pageStatus}.`}`,
-    "",
-    "| Crawler | Owner | What it does | robots.txt | UA probe | IP list |",
-    "|---|---|---|---|---|---|",
-    ...r.rows.map((x) => `| ${x.token} | ${x.owner} | ${x.purpose} | ${x.robots === "blocked" ? `**blocked**${x.robotsRule ? ` (${x.robotsRule})` : ""}` : x.robots} | ${x.probe ?? (r.baselineBlocked ? "inconclusive" : "n/a")} | ${x.ipList ?? "none published"} |`),
-    "",
-    "### What stands out"
-  ];
-  if (r.rows.every((x) => x.robots === "unknown")) out.push("- We couldn't read robots.txt, so per-bot rules are unknown.");
-  else if (!blocked.length) out.push("- robots.txt lets every listed crawler reach this page.");
-  else out.push(`- robots.txt blocks ${blocked.map((b) => b.token).join(", ")} from this page. Blocking training bots (GPTBot, ClaudeBot, CCBot, Google-Extended) is a business choice. Blocking search or user-fetch bots (OAI-SearchBot, ChatGPT-User, PerplexityBot, Claude-SearchBot) keeps the page out of those AI answers.`);
-  if (r.baselineBlocked) out.push(`- The site's firewall or CDN ${r.pageChallenged ? "challenged" : `refused (${r.pageStatus})`} our automated check, so page-level directives and the bot user-agent probe are inconclusive. This is common on sites with bot protection, and verified crawlers coming from their real IPs usually still get through. Confirm in your CDN's bot or firewall logs, or allow AI bots by their published IP ranges.`);
-  else if (noindex) out.push(`- The page itself says not to index it: ${pageDirectives.join("; ")}.`);
-  else if (pageDirectives.length) out.push(`- Page-level directives: ${pageDirectives.join("; ")}.`);
-  if (probeIssues.length) out.push(`- Requests using these bots' user-agents were treated differently from a browser: ${probeIssues.map((p) => `${p.token} (${p.probe})`).join(", ")}. A CDN or firewall rule may be blocking them. This probe comes from ${from}, not the bots' real IPs, so some firewalls block it as an impostor while still letting the verified bot in; confirm in your CDN's bot or firewall logs.`);
-  else if (!r.baselineBlocked) out.push(`- No firewall or CDN difference showed up for the bot user-agents we probed (from ${from}; verified-IP rules can't be seen this way).`);
-  const okMaps = r.sitemaps.filter((s) => s.status === 200 && !s.challenged);
-  const blockedMaps = r.sitemaps.filter((s) => s.challenged || s.status === 403);
-  out.push(!okMaps.length && blockedMaps.length ? `- Sitemap: the firewall blocked our check of ${blockedMaps.map((s) => s.url).join(", ")}, so we couldn't confirm it.` : okMaps.length ? `- Sitemap: ${okMaps.map((s) => s.url).join(", ")}${okMaps.some((s) => s.listed) ? " (listed in robots.txt)" : " (not listed in robots.txt; add a Sitemap: line)"}.` : "- No working sitemap found in robots.txt or at /sitemap.xml.");
-  out.push(r.llmsTxt === "unknown" ? "- llms.txt: blocked by the firewall, couldn't check." : r.llmsTxt === "present" ? "- llms.txt is present." : "- No llms.txt. It's optional, but some AI tools read it as a guide to your key pages.");
-  out.push("- Operators with an IP list can be allowlisted by IP in your firewall, which is safer than allowing by user-agent alone.");
-  out.push("", aiPrefsMarkdown(r.aiPrefs));
-  out.push("", "AlchemyAgent Pro rechecks this weekly and reads your CDN logs to confirm which AI bots actually reach you: https://alchemyagent.ai");
-  return out.join("\n");
-}
-
-// src/links.ts
-var LINKS_UA = "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)";
-var STOP = new Set("a an and are as at be by can do for from how i in is it of on or our the to vs what when where which who why with you your best top near me 2024 2025 2026".split(" "));
-var GENERIC_TOPIC = new Set("seo services service agency agencies company companies marketing digital google online business strategy strategies guide tips tools free cost".split(" "));
-var GENERIC = /^(read more|read story|read the story|learn more|click here|here|more|this|link|this page|see more|find out more|continue reading|details|view|view more)$/i;
-var UTILITY = /^\/(call|contact[^/]*|book[^/]*|privacy[^/]*|terms[^/]*|legal|disclaimer|[^/]*polic(y|ies)|site-?map|entitymap\.html|thank[^/]*|search[^/]*|cart|account|login|blog|newsletters?)\/?$|\.html$/i;
-var OPERATOR = /[":]|^site |^inurl|^intitle/;
-var SKIP_PATH = /(^\/wp-|\/feed\/?$|\/tag\/|\/author\/|\/page\/\d+|\.(pdf|jpe?g|png|webp|gif|svg|zip|xml|css|js)$|\/cdn-cgi\/)/i;
-var ZONE_TAGS = ["nav", "header", "footer", "aside"];
-var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;|&rsquo;|&lsquo;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&ndash;|&mdash;/g, "-").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
-var text = (fragment) => decode(fragment.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-function norm(u) {
-  try {
-    const p = new URL(u);
-    return `${p.protocol}//${p.host.toLowerCase().replace(/^www\./, "")}${p.pathname.replace(/\/+$/, "") || "/"}`;
-  } catch {
-    return u;
-  }
-}
-function tokens(s) {
-  return new Set((s.toLowerCase().match(/[a-z0-9][a-z0-9+.-]*/g) ?? []).filter((w) => !STOP.has(w) && w.length > 2));
-}
-var minus = (a, b) => new Set([...a].filter((w) => !b.has(w)));
-function zones(html) {
-  const spans = [];
-  for (const tag2 of ZONE_TAGS)
-    for (const m of html.matchAll(new RegExp(`<${tag2}\\b[\\s\\S]*?</${tag2}>`, "gi")))
-      spans.push([m.index, m.index + m[0].length, tag2 === "footer" ? "footer" : tag2 === "aside" ? "other" : "nav"]);
-  return spans;
-}
-function extractLinks(pageUrl, html, host4) {
-  const clean2 = html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1>/gi, (m) => " ".repeat(m.length));
-  const zs = zones(clean2);
-  const out = [];
-  for (const m of clean2.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
-    const hm = m[1].match(/\bhref\s*=\s*["']([^"']+)["']/i);
-    if (!hm) continue;
-    const href = decode(hm[1]).trim();
-    if (/^(#|mailto:|tel:|javascript:)/i.test(href)) continue;
-    let abs;
-    try {
-      abs = new URL(href, pageUrl);
-    } catch {
-      continue;
-    }
-    abs.hash = "";
-    if (!/^https?:$/.test(abs.protocol) || abs.hostname.toLowerCase().replace(/^www\./, "") !== host4 || SKIP_PATH.test(abs.pathname)) continue;
-    let zone = "body";
-    for (const [a, b, z] of zs) {
-      if (a <= m.index && m.index < b) {
-        zone = z;
-        if (z === "nav" || z === "footer") break;
-      }
-    }
-    const anchor = text(m[2]) || m[1].match(/\baria-label\s*=\s*["']([^"']+)/i)?.[1] || m[2].match(/alt\s*=\s*["']([^"']+)/i)?.[1] || "";
-    out.push({ to: norm(abs.href.split("?")[0]), raw: abs.href, anchor: anchor.slice(0, 120), zone, nofollow: /\brel\s*=\s*["'][^"']*nofollow/i.test(m[1]) });
-  }
-  return out;
-}
-var NON_BODY = /<!--[\s\S]*?-->|<(script|style|noscript|template|nav|header|footer|aside|form)\b[\s\S]*?<\/\1>/gi;
-function bodyText(html) {
-  const x = html.replace(NON_BODY, " ");
-  const m = x.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i);
-  return text(m ? m[2] : x);
-}
-function paragraphs(html) {
-  const x = html.replace(NON_BODY, " ");
-  const out = [];
-  for (const m of x.matchAll(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
-    const t = text(m[2]);
-    if (t.length >= 60 && t.length <= 700 && !/^(by [a-z]+ [a-z]+ ·|published|updated|table of contents)/i.test(t)) out.push(t);
-    if (out.length >= 400) break;
-  }
-  return out;
-}
-async function pool2(items, n, fn, onDone) {
-  const out = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) {
-      const k = i++;
-      out[k] = await fn(items[k]);
-      onDone?.();
-    }
-  }));
-  return out;
-}
-async function sitemapUrls(base, f, limit) {
-  const origin = new URL(base).origin;
-  const host4 = new URL(base).hostname.replace(/^www\./, "");
-  const robots = await get(f, `${origin}/robots.txt`, LINKS_UA, 1e4);
-  const listed = robots.status === 200 ? parseRobots(robots.text).sitemaps : [];
-  const todo = listed.length ? [...listed] : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
-  const seenMaps = /* @__PURE__ */ new Set(), seen = /* @__PURE__ */ new Set(), urls = [];
-  while (todo.length && urls.length < limit && seenMaps.size < 60) {
-    const sm = todo.shift();
-    if (seenMaps.has(sm)) continue;
-    seenMaps.add(sm);
-    const r = await get(f, sm, LINKS_UA, 2e4);
-    if (r.status !== 200) continue;
-    const locs = [...r.text.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/gi)].map((m) => decode(m[1]));
-    if (/<sitemapindex/i.test(r.text)) {
-      todo.push(...locs.filter((u) => !/(image|video|news|agentic)/i.test(u)));
-      continue;
-    }
-    for (const u of locs) {
-      let h = "";
-      try {
-        h = new URL(u).hostname.replace(/^www\./, "");
-      } catch {
-        continue;
-      }
-      if (h !== host4 || seen.has(u) || /\.(jpe?g|png|webp|gif|pdf|xml)(\?|$)/i.test(u)) continue;
-      seen.add(u);
-      urls.push(u);
-      if (urls.length >= limit) break;
-    }
-  }
-  return urls;
-}
-var isChallenge = (status, headers, body) => headers.get("cf-mitigated") === "challenge" || (status === 403 || status === 503) && /Just a moment|cf-chl|captcha|challenge-platform/i.test(body.slice(0, 5e3));
-async function crawl(urls, f, host4, onDone) {
-  const out = {};
-  const rows = await pool2(urls, 6, async (u) => {
-    const r = await get(f, u, LINKS_UA, 2e4);
-    if (r.status === 0) return [u, { status: 0 }];
-    if (isChallenge(r.status, r.headers, r.text)) return [u, { status: r.status, challenged: true }];
-    if (r.status !== 200 || !/html/i.test(r.headers.get("content-type") ?? "")) return [u, { status: r.status }];
-    const t = r.text;
-    return [u, {
-      status: 200,
-      final: norm(r.url),
-      title: text(t.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").slice(0, 160),
-      h1: text(t.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "").slice(0, 160),
-      noindex: /<meta[^>]+name=["']robots["'][^>]+noindex/i.test(t),
-      links: extractLinks(r.url, t, host4),
-      text: bodyText(t).slice(0, 4e4),
-      paras: paragraphs(t)
-    }];
-  }, onDone);
-  for (const [u, p] of rows) out[norm(u)] = p;
-  return out;
-}
-async function resolveTargets(targets, f, onDone) {
-  const out = {};
-  const rows = await pool2(Object.entries(targets), 6, async ([u, raw]) => {
-    let cur = raw.split("?")[0], hops = 0;
-    while (hops < 6) {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 15e3);
-      try {
-        const r = await f(cur, { headers: { "user-agent": LINKS_UA, accept: "text/html,*/*" }, redirect: "manual", signal: ctl.signal });
-        await r.body?.cancel().catch(() => {
-        });
-        const loc = r.headers.get("location");
-        if ([301, 302, 307, 308].includes(r.status) && loc) {
-          cur = new URL(loc, cur).href;
-          hops++;
-          continue;
-        }
-        return [u, { status: r.status, final: norm(cur), hops }];
-      } catch {
-        return [u, { status: 0 }];
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    return [u, { status: 310, final: norm(cur), hops }];
-  }, onDone);
-  for (const [u, r] of rows) out[u] = r;
-  return out;
-}
-function pagerank(nodes, edges, d = 0.85, iters = 60) {
-  const n = nodes.length;
-  if (!n) return {};
-  const idx = new Map(nodes.map((u, i) => [u, i]));
-  const outs = nodes.map(() => []);
-  const list = edges instanceof Set ? [...edges].map((e) => e.split("	")) : edges;
-  for (const [a, b] of list) if (idx.has(a) && idx.has(b) && a !== b) outs[idx.get(a)].push(idx.get(b));
-  let pr = new Array(n).fill(1 / n);
-  for (let it = 0; it < iters; it++) {
-    const nxt = new Array(n).fill((1 - d) / n);
-    let dangling = 0;
-    for (let i = 0; i < n; i++) if (!outs[i].length) dangling += pr[i];
-    for (let i = 0; i < n; i++) if (outs[i].length) {
-      const share = d * pr[i] / outs[i].length;
-      for (const j of outs[i]) nxt[j] += share;
-    }
-    for (let j = 0; j < n; j++) nxt[j] += d * dangling / n;
-    pr = nxt;
-  }
-  const top = Math.max(...pr) || 1;
-  return Object.fromEntries(nodes.map((u, i) => [u, Math.round(pr[i] / top * 1e4) / 100]));
-}
-function bestSentence(paras, anchor) {
-  const all = tokens(anchor);
-  const want = minus(all, GENERIC_TOPIC).size ? minus(all, GENERIC_TOPIC) : all;
-  let best = "", score = 0;
-  for (const para of paras)
-    for (const s of para.split(/(?<=[.!?])\s+/)) {
-      if (s.length < 40 || s.length > 400) continue;
-      const st = tokens(s);
-      const hit = [...want].filter((w) => st.has(w)).length;
-      if (hit > score) {
-        best = s;
-        score = hit;
-      }
-    }
-  return score >= Math.min(2, want.size) ? best.slice(0, 260) : "";
-}
-var esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-function buildPlan(pages, resolved, gsc, base, o) {
-  const brands = o.brand.map((b) => b.trim().toLowerCase()).filter(Boolean);
-  const brandRe = brands.length ? new RegExp(brands.map(esc).join("|"), "i") : null;
-  const isTopicQ = (q) => !OPERATOR.test(q) && !(brandRe && brandRe.test(q));
-  const pathOf = (u) => {
-    try {
-      return new URL(u).pathname || "/";
-    } catch {
-      return "/";
-    }
-  };
-  const utility = (u) => UTILITY.test(pathOf(u));
-  const ok = {};
-  for (const [u, p] of Object.entries(pages)) if (p.status === 200 && !p.noindex) ok[u] = { title: p.title ?? "", h1: p.h1 ?? "", links: p.links ?? [], text: p.text ?? "", paras: p.paras ?? [] };
-  const nodes = Object.keys(ok).sort();
-  const status = {};
-  for (const u of nodes) status[u] = { status: 200, final: u };
-  for (const [u, r] of Object.entries(resolved)) if (!status[u]) status[u] = r;
-  for (const [u, p] of Object.entries(pages)) if (!status[u] && p.status >= 400) status[u] = { status: p.status, final: u };
-  const freq = /* @__PURE__ */ new Map();
-  for (const p of Object.values(ok)) for (const k of new Set(p.links.map((l) => `${l.to}	${l.anchor.toLowerCase()}`))) freq.set(k, (freq.get(k) ?? 0) + 1);
-  if (nodes.length >= 10) {
-    for (const p of Object.values(ok)) for (const l of p.links) if (l.zone === "body" && (freq.get(`${l.to}	${l.anchor.toLowerCase()}`) ?? 0) >= 0.4 * nodes.length) l.zone = "template";
-  }
-  const edges = /* @__PURE__ */ new Set(), bodyEdges = /* @__PURE__ */ new Set();
-  const anyIn = /* @__PURE__ */ new Map(), anchorsTo = /* @__PURE__ */ new Map();
-  const redirects = [], broken = [], generic = [];
-  for (const src of nodes) {
-    for (const l of ok[src].links) {
-      const st = status[l.to] ?? { status: 0 };
-      const dst = st.final ?? l.to;
-      if (dst !== l.to && ([301, 302, 307, 308].includes(st.status) || st.status === 200 && st.hops)) redirects.push({ page: src, href: l.raw, final: dst, anchor: l.anchor, zone: l.zone });
-      else if (st.status >= 400) {
-        broken.push({ page: src, href: l.raw, status: st.status, anchor: l.anchor, zone: l.zone });
-        continue;
-      }
-      if (dst === src) continue;
-      edges.add(`${src}	${dst}`);
-      anyIn.set(dst, (anyIn.get(dst) ?? 0) + 1);
-      if (l.zone === "body") {
-        bodyEdges.add(`${src}	${dst}`);
-        const a = l.anchor.trim();
-        if (a && GENERIC.test(a)) generic.push({ page: src, to: dst, anchor: a });
-        if (a.length >= 4 && !GENERIC.test(a)) {
-          const k = a.toLowerCase();
-          if (!anchorsTo.has(k)) anchorsTo.set(k, /* @__PURE__ */ new Set());
-          anchorsTo.get(k).add(dst);
-        }
-      }
-    }
-  }
-  const pr = pagerank(nodes, edges);
-  const gp = gsc.pages;
-  const qByPage = /* @__PURE__ */ new Map();
-  for (const [page, q, c, i, pos] of gsc.pq) if (isTopicQ(q)) {
-    if (!qByPage.has(page)) qByPage.set(page, []);
-    qByPage.get(page).push([q, c, i, pos]);
-  }
-  const prof = /* @__PURE__ */ new Map();
-  for (const u of nodes) {
-    const t = /* @__PURE__ */ new Map();
-    for (const [q, , i] of [...qByPage.get(u) ?? []].sort((a, b) => b[2] - a[2]).slice(0, 40))
-      for (const w of minus(tokens(q), GENERIC_TOPIC)) t.set(w, (t.get(w) ?? 0) + Math.log10(i + 10));
-    for (const w of minus(tokens(`${ok[u].title} ${ok[u].h1}`), GENERIC_TOPIC)) t.set(w, (t.get(w) ?? 0) + 1);
-    prof.set(u, t);
-  }
-  const total = (m) => [...m.values()].reduce((a, b) => a + b, 0);
-  const sim = (a, b) => {
-    const ta = prof.get(a), tb = prof.get(b);
-    if (!ta.size || !tb.size) return 0;
-    let inter = 0;
-    for (const [w, v] of ta) if (tb.has(w)) inter += Math.min(v, tb.get(w));
-    return inter / (Math.min(total(ta), total(tb)) || 1);
-  };
-  const topicImpr = new Map(nodes.map((u) => [u, (qByPage.get(u) ?? []).reduce((a, r) => a + r[2], 0)]));
-  const topicRank = new Map(nodes.map((u) => [u, (qByPage.get(u) ?? []).filter((r) => r[3] && r[3] <= 10)]));
-  const ranksWell = (u) => !utility(u) && ok[u].text.split(/\s+/).length >= 250 && topicRank.get(u).reduce((a, r) => a + r[2], 0) >= 20;
-  const cands = nodes.filter((u) => gp[u] && !utility(u) && gp[u].position >= o.posMin && gp[u].position <= o.posMax && topicImpr.get(u) >= o.minImpressions);
-  cands.sort((a, b) => topicImpr.get(b) - topicImpr.get(a));
-  const usedAnchor = new Map([...anchorsTo].map(([a, v]) => [a, new Set(v)]));
-  const proposals = [];
-  for (const c of cands) {
-    const pageWords = tokens(`${ok[c].title} ${ok[c].h1} ${ok[c].text.slice(0, 2e4)}`);
-    const qs = [...qByPage.get(c) ?? []].sort((a, b) => b[2] - a[2]).map((r) => r[0]).filter((q) => q.length >= 4 && q.length <= 60 && q.split(/\s+/).length <= 6 && [...tokens(q)].every((w) => pageWords.has(w))).slice(0, 8);
-    const donors = [];
-    for (const d of nodes) {
-      if (d === c || bodyEdges.has(`${d}	${c}`) || !ranksWell(d)) continue;
-      const s = sim(c, d);
-      if (s < 0.12) continue;
-      donors.push([s * (1 + Math.log10((gp[d]?.impressions ?? 0) + 10)) * (1 + pr[d] / 50), s, d]);
-    }
-    donors.sort((a, b) => b[0] - a[0]);
-    let k = 0, taken = 0;
-    for (const [, s, d] of donors.slice(0, 12)) {
-      if (taken >= o.donorsPer) break;
-      const order = [...qs.slice(k), ...qs.slice(0, k)];
-      const anchor = order.find((q) => ![...usedAnchor.get(q.toLowerCase()) ?? []].some((x) => x !== c)) ?? (ok[c].h1 || ok[c].title).split(" | ")[0];
-      const sent = bestSentence(ok[d].paras.length ? ok[d].paras : [ok[d].text], anchor);
-      if (!sent) continue;
-      k++;
-      taken++;
-      if (!usedAnchor.has(anchor.toLowerCase())) usedAnchor.set(anchor.toLowerCase(), /* @__PURE__ */ new Set());
-      usedAnchor.get(anchor.toLowerCase()).add(c);
-      proposals.push({
-        target: c,
-        target_title: ok[c].title,
-        target_position: gp[c].position,
-        target_impressions: topicImpr.get(c),
-        target_clicks: gp[c].clicks,
-        donor: d,
-        donor_title: ok[d].title,
-        donor_position: gp[d]?.position ?? 0,
-        similarity: Math.round(s * 100) / 100,
-        donor_authority: pr[d],
-        anchor,
-        place_near: sent,
-        target_authority_before: 0,
-        target_authority_after: 0
-      });
-    }
-  }
-  const after = pagerank(nodes, /* @__PURE__ */ new Set([...edges, ...proposals.map((p) => `${p.donor}	${p.target}`)]));
-  for (const p of proposals) {
-    p.target_authority_before = pr[p.target];
-    p.target_authority_after = after[p.target];
-  }
-  const home = norm(base);
-  const orphans = nodes.filter((u) => !anyIn.get(u) && u !== home);
-  const tmpl = {};
-  for (const l of ok[home]?.links ?? []) tmpl[l.zone] = (tmpl[l.zone] ?? 0) + 1;
-  return {
-    pages: nodes.length,
-    edges: edges.size,
-    body_edges: bodyEdges.size,
-    candidates: cands.length,
-    proposals,
-    redirect_links: redirects,
-    broken_links: broken,
-    generic_anchors: generic,
-    mixed_anchors: [...anchorsTo].filter(([, v]) => v.size > 1).map(([anchor, v]) => ({ anchor, targets: [...v].sort() })),
-    orphans,
-    prune_or_link: orphans.filter((u) => (gp[u]?.impressions ?? 0) < 10),
-    leave_alone: nodes.filter((u) => gp[u] && gp[u].position && gp[u].position <= 5 && gp[u].clicks >= 10),
-    homepage_links: tmpl,
-    authority: Object.fromEntries(Object.entries(pr).sort((a, b) => b[1] - a[1]).slice(0, 30)),
-    unlinked_candidates: cands.filter((c) => !proposals.some((p) => p.target === c))
-  };
-}
-async function runLinks(o) {
-  const host4 = new URL(o.base).hostname.toLowerCase().replace(/^www\./, "");
-  const prog = o.progress ?? { phase: "", done: 0, total: 0 };
-  Object.assign(prog, { phase: "reading sitemaps", done: 0, total: 0 });
-  const urls = await sitemapUrls(o.base, o.f, o.maxPages);
-  if (!urls.length) throw new Error(`No sitemap URLs found for ${o.base} (checked robots.txt Sitemap lines and /sitemap.xml). The crawl starts from the sitemap, so publish one first.`);
-  Object.assign(prog, { phase: "crawling pages", done: 0, total: urls.length });
-  const pages = await crawl(urls, o.f, host4, () => prog.done++);
-  const blocked = Object.values(pages).filter((p) => p.challenged).length;
-  const known = new Set(Object.keys(pages));
-  const targets = {};
-  for (const p of Object.values(pages)) for (const l of p.status === 200 ? p.links ?? [] : []) if (!known.has(l.to) && !targets[l.to] && Object.keys(targets).length < 1500) targets[l.to] = l.raw;
-  Object.assign(prog, { phase: "checking link targets", done: 0, total: Object.keys(targets).length });
-  const resolved = await resolveTargets(targets, o.f, () => prog.done++);
-  Object.assign(prog, { phase: "building the plan", done: 0, total: 0 });
-  const plan = buildPlan(pages, resolved, o.gsc ?? { pages: {}, pq: [] }, o.base, o.plan);
-  return { site: norm(o.base), date: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), range: [o.plan.posMin, o.plan.posMax], gscProperty: o.gsc ? o.gscProperty : void 0, crawled: Object.keys(pages).length, blocked, sitemapUrls: urls.length, plan };
-}
-var csvCell2 = (v) => {
-  const s = String(v ?? "");
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-var csv = (rows) => rows.map((r) => r.map(csvCell2).join(",")).join("\n") + "\n";
-async function saveLinkFiles(r, md, outDir) {
-  const host4 = new URL(r.site).hostname;
-  const dir = resolvePath((outDir ?? join(homedir(), "Downloads", "alchemyagent-reports")).replace(/^~(?=\/)/, homedir()));
-  await mkdir(dir, { recursive: true });
-  const stem = join(dir, `internal-links-${host4}-${r.date}`);
-  const p = r.plan;
-  const fields = ["target", "target_position", "target_impressions", "target_clicks", "donor", "donor_position", "similarity", "donor_authority", "anchor", "place_near", "target_authority_before", "target_authority_after"];
-  const cleanup = [["type", "page", "href_or_to", "detail", "anchor", "zone"]];
-  for (const x of p.redirect_links) cleanup.push(["redirect (rewrite to final URL)", x.page, x.href, x.final, x.anchor, x.zone]);
-  for (const x of p.broken_links) cleanup.push(["broken", x.page, x.href, x.status, x.anchor, x.zone]);
-  for (const x of p.generic_anchors) cleanup.push(["generic anchor", x.page, x.to, "", x.anchor, "body"]);
-  for (const x of p.mixed_anchors) cleanup.push(["same anchor, different URLs", "", x.targets.join(" | "), "", x.anchor, "body"]);
-  for (const u of p.orphans) cleanup.push([`orphan${p.prune_or_link.includes(u) ? " (prune or link)" : ""}`, u, "", "", "", ""]);
-  const files = [`${stem}.csv`, `${stem}.cleanup.csv`, `${stem}.json`, `${stem}.md`];
-  await writeFile(files[0], csv([fields, ...p.proposals.map((x) => fields.map((k) => x[k]))]));
-  await writeFile(files[1], csv(cleanup));
-  await writeFile(files[2], JSON.stringify(r, null, 1));
-  await writeFile(files[3], md + "\n");
-  return files;
-}
-var fmt = (n) => Math.round(n).toLocaleString("en-US");
-var cell = (s) => s.replace(/\|/g, "/").replace(/\n/g, " ");
-function linksMarkdown(r, show = 25) {
-  const p = r.plan;
-  const short = (u) => u.replace(r.site.replace(/\/$/, ""), "") || "/";
-  const L = [
-    `# Internal link rewiring: ${new URL(r.site).hostname}`,
-    "",
-    `Plan only, nothing on the site changed. ${r.date}: ${p.pages} indexable pages from ${r.sitemapUrls} sitemap URLs, ${fmt(p.edges)} internal links (${fmt(p.body_edges)} in body copy).${r.blocked ? ` ${r.blocked} pages were blocked by a firewall challenge and skipped.` : ""}`
-  ];
-  if (!r.gscProperty) L.push("", "**Search Console isn't connected**, so there are no impression-based link targets in this run: cleanup only. Connect Google (gsc_connect) and run it again for the full plan.");
-  else L.push(`Search Console: ${r.gscProperty}. Impressions below are non-brand.`);
-  L.push("");
-  const targets = /* @__PURE__ */ new Map();
-  for (const x of p.proposals) {
-    if (!targets.has(x.target)) targets.set(x.target, []);
-    targets.get(x.target).push(x);
-  }
-  if (r.gscProperty) {
-    L.push(
-      p.proposals.length ? `## ${targets.size} page${targets.size === 1 ? "" : "s"} stuck at positions ${r.range[0]}-${r.range[1]} get ${p.proposals.length} new body link${p.proposals.length === 1 ? "" : "s"}` : `## No new body links this run`,
-      "Each link comes from a page that already ranks on page one for the same topic. Anchors are the target's own queries. Add each link inside the donor's body copy, in or next to the quoted sentence.",
-      ""
-    );
-    if (p.proposals.length) {
-      L.push("| Target page | Position | Impressions | Link from | Anchor | Place near | Authority before \u2192 after |", "|---|---:|---:|---|---|---|---|");
-      for (const x of p.proposals.slice(0, show))
-        L.push(`| ${short(x.target)} | ${x.target_position} | ${fmt(x.target_impressions)} | ${short(x.donor)} (pos ${x.donor_position}) | ${cell(x.anchor)} | \u201C${cell(x.place_near.slice(0, 140))}${x.place_near.length > 140 ? "\u2026" : ""}\u201D | ${x.target_authority_before} \u2192 ${x.target_authority_after} |`);
-      if (p.proposals.length > show) L.push("", `\u2026and ${p.proposals.length - show} more in the CSV.`);
-    } else L.push(p.candidates ? `Pages are sitting at ${r.range[0]}-${r.range[1]}, but no page that already ranks on the same topic has a natural spot for a link. Those pages need content work first.` : `No pages with real impressions are sitting at positions ${r.range[0]}-${r.range[1]} right now.`);
-    if (p.unlinked_candidates.length) L.push("", `${p.unlinked_candidates.length}${p.proposals.length ? " more" : ""} page${p.unlinked_candidates.length === 1 ? "" : "s"} at ${r.range[0]}-${r.range[1]} had no good donor: ${p.unlinked_candidates.slice(0, 8).map(short).join(", ")}.`);
-    L.push("");
-  }
-  L.push(
-    "## Cleanup",
-    `- **${p.redirect_links.length} links point at redirects.** Rewrite each to its final URL at the source.`,
-    `- **${p.broken_links.length} links point at errors** (4xx/5xx).`,
-    `- **${p.generic_anchors.length} body links use generic anchors** ("read more", "click here"). Replace them with words that describe the target.`,
-    `- **${p.mixed_anchors.length} anchors point at more than one URL**, which blurs which page owns the topic.`,
-    `- **${p.orphans.length} sitemap pages have no internal links**${p.prune_or_link.length ? ` (${p.prune_or_link.length} with no search demand either: link them or prune them)` : ""}.`
-  );
-  const ex = [...p.broken_links.slice(0, 5).map((x) => `- Broken: ${short(x.page)} \u2192 ${x.href} (${x.status})`), ...p.redirect_links.slice(0, 5).map((x) => `- Redirect: ${short(x.page)} \u2192 ${x.href} \u2192 ${short(x.final)}`), ...p.orphans.slice(0, 5).map((u) => `- Orphan: ${short(u)}`)];
-  if (ex.length) L.push("", "Examples:", ...ex);
-  if (Object.keys(p.homepage_links).length) L.push("", `Homepage links by zone: ${Object.entries(p.homepage_links).sort().map(([k, v]) => `${k} ${v}`).join(", ")}.`);
-  if (p.leave_alone.length) L.push("", `Leave alone: ${p.leave_alone.length} pages already rank in the top 5 with clicks. Don't rewire their links.`);
-  L.push(
-    "",
-    "Authority is internal PageRank on a 0 to 100 scale (100 = the strongest page). It estimates how link equity flows; Google's own signals aren't public.",
-    `Baseline for measuring: ${r.date}. Re-check the target pages with gsc_performance (page filter) about 4 and 8 weeks after the links go live.`
-  );
-  if (r.files?.length) L.push("", "Files:", ...r.files.map((x) => `- ${x}`));
-  return L.join("\n");
-}
-
 // src/pagespeed.ts
 var GOOGLE_PSI = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 var FIELD_METRICS = {
@@ -1314,7 +632,7 @@ function summarize(raw, strategy) {
   const hasMetrics = (x) => x?.metrics && Object.keys(x.metrics).length > 0 && x.origin_fallback !== true;
   const src = hasMetrics(page) ? page : origin?.metrics ? origin : null;
   const scope = src === page && src ? "page" : src ? "origin" : "none";
-  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt3]]) => ({ name, value: fmt3(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
+  const metrics = src ? Object.entries(FIELD_METRICS).filter(([k]) => src.metrics[k]).map(([k, [name, fmt2]]) => ({ name, value: fmt2(src.metrics[k].percentile), rating: String(src.metrics[k].category ?? "").replace("_", " ").toLowerCase() })) : [];
   const audits = lh.audits ?? {};
   const lab = LAB_METRICS.filter((k) => audits[k]?.displayValue).map((k) => ({ name: audits[k].title, value: audits[k].displayValue }));
   const opportunities = Object.values(audits).filter((a) => a?.details?.type === "opportunity" && (a.details.overallSavingsMs ?? 0) >= 100 && (a.score ?? 1) < 0.9).sort((a, b) => b.details.overallSavingsMs - a.details.overallSavingsMs).slice(0, 5).map((a) => ({ title: a.title, savings: `~${(a.details.overallSavingsMs / 1e3).toFixed(1)}s` }));
@@ -1611,10 +929,10 @@ function bucket(q) {
   if (words2.length >= 7 || words2.length >= 4 && CONVO.test(s) || /[^\x00-\x7f]/.test(s)) return "Candidate";
   return "Ordinary";
 }
-function parseCsv(text2) {
+function parseCsv(text) {
   const rows = [];
   let row = [], field = "", q = false;
-  const t = text2.replace(/^﻿/, "");
+  const t = text.replace(/^﻿/, "");
   for (let i = 0; i < t.length; i++) {
     const c = t[i];
     if (q) {
@@ -1643,8 +961,8 @@ var num = (v) => {
   const n = parseFloat(String(v ?? "").replace(/[,%]/g, "").trim());
   return Number.isFinite(n) ? n : 0;
 };
-function rowsFromCsv(text2) {
-  const [head, ...data] = parseCsv(text2);
+function rowsFromCsv(text) {
+  const [head, ...data] = parseCsv(text);
   if (!head) return [];
   const h = head.map((x) => x.trim().toLowerCase());
   const qi = h.findIndex((x) => ["top queries", "query", "queries"].includes(x));
@@ -1730,12 +1048,12 @@ function entityMarkdown(r, siteSameAs) {
 }
 
 // src/wayback.ts
-var UA2 = "AlchemyAgent/0.1 (https://alchemyagent.ai; support@alchemyagent.ai)";
+var UA = "AlchemyAgent/0.1 (https://alchemyagent.ai; support@alchemyagent.ai)";
 var CDX = "https://web.archive.org/cdx/search/cdx";
 async function get2(f, url, tries = 3) {
   let last = null;
   for (let i = 0; i < tries; i++) {
-    const r = await f(url, { headers: { "user-agent": UA2 } });
+    const r = await f(url, { headers: { "user-agent": UA } });
     if (r.ok) return r;
     last = r;
     if (r.status !== 429 && r.status < 500) break;
@@ -1743,7 +1061,7 @@ async function get2(f, url, tries = 3) {
   }
   throw new Error(last?.status === 429 ? "The Wayback Machine is rate-limiting requests right now. Try again in a few minutes." : `The Wayback Machine returned ${last?.status}.`);
 }
-var fmt2 = (ts) => `${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)}`;
+var fmt = (ts) => `${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)}`;
 var TRACK = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "PerplexityBot", "Google-Extended", "CCBot", "Applebot-Extended", "Bytespider", "Googlebot"];
 async function robotsHistory(domain, f = fetch, maxFetch = 6) {
   const d = domain.replace(/^www\./, "");
@@ -1758,13 +1076,13 @@ async function robotsHistory(domain, f = fetch, maxFetch = 6) {
       const body = await (await get2(f, `https://web.archive.org/web/${ts}id_/https://${d}/robots.txt`, 2)).text();
       if (/<html/i.test(body.slice(0, 300))) return null;
       const robots = parseRobots(body);
-      return { date: fmt2(ts), blocked: TRACK.filter((t) => !isAllowed(rulesFor(robots, t).rules, "/").allowed) };
+      return { date: fmt(ts), blocked: TRACK.filter((t) => !isAllowed(rulesFor(robots, t).rules, "/").allowed) };
     } catch {
       return null;
     }
   }));
   const sampled = results.filter((x) => !!x);
-  return { domain: d, versions: rows.length, sampled, first: fmt2(rows[0][0]), last: fmt2(rows[rows.length - 1][0]) };
+  return { domain: d, versions: rows.length, sampled, first: fmt(rows[0][0]), last: fmt(rows[rows.length - 1][0]) };
 }
 async function pageHistory(url, f = fetch) {
   const r = await get2(f, `${CDX}?url=${encodeURIComponent(url)}&output=json&fl=timestamp,digest&filter=statuscode:200&collapse=timestamp:8&limit=5000`);
@@ -1776,7 +1094,7 @@ async function pageHistory(url, f = fetch) {
     if (dg !== prev) changes++;
     prev = dg;
   }
-  return { url, captures: rows.length, first: rows[0] && fmt2(rows[0][0]), last: rows.length ? fmt2(rows[rows.length - 1][0]) : void 0, byYear, changes: Math.max(0, changes - 1) };
+  return { url, captures: rows.length, first: rows[0] && fmt(rows[0][0]), last: rows.length ? fmt(rows[rows.length - 1][0]) : void 0, byYear, changes: Math.max(0, changes - 1) };
 }
 function waybackMarkdown(robots, page) {
   const out = [];
@@ -1811,26 +1129,26 @@ function waybackMarkdown(robots, page) {
 var TRACKED_BOTS = TRACK.filter((t) => BOTS.some((b) => b.token === t));
 
 // src/commoncrawl.ts
-var UA3 = "AlchemyAgent/0.1 (https://alchemyagent.ai; support@alchemyagent.ai)";
+var UA2 = "AlchemyAgent/0.1 (https://alchemyagent.ai; support@alchemyagent.ai)";
 async function getText(f, url, tries = 2, timeoutMs = 12e3) {
-  let status = 0, text2 = "";
+  let status = 0, text = "";
   for (let i = 0; i < tries; i++) {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-      const r = await f(url, { headers: { "user-agent": UA3 }, signal: ctl.signal });
+      const r = await f(url, { headers: { "user-agent": UA2 }, signal: ctl.signal });
       status = r.status;
-      text2 = await r.text();
-      if (r.ok || r.status === 404) return { status, text: text2 };
+      text = await r.text();
+      if (r.ok || r.status === 404) return { status, text };
     } catch (e) {
       status = 0;
-      text2 = String(e);
+      text = String(e);
     } finally {
       clearTimeout(t);
     }
     if (i < tries - 1) await new Promise((res) => setTimeout(res, 1500));
   }
-  return { status, text: text2 };
+  return { status, text };
 }
 async function commonCrawlCheck(domain, f = fetch, crawls = 3) {
   const d = domain.replace(/^www\./, "").toLowerCase();
@@ -1881,9 +1199,9 @@ function commonCrawlMarkdown(r, ccbotBlocked) {
 }
 
 // src/render.ts
-var BROWSER_UA2 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-var decode2 = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&[a-z]+;/gi, " ");
-var textOf = (html) => decode2(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+var BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&rsquo;|&lsquo;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&[a-z]+;/gi, " ");
+var textOf = (html) => decode(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 var words = (s) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 function frameworks(html) {
   const f = [
@@ -1907,7 +1225,7 @@ function frameworks(html) {
   return f.filter(([, re]) => re.test(html)).map(([n]) => n);
 }
 async function renderCheck(url, f = fetch) {
-  const r = await get(f, url, BROWSER_UA2, 2e4);
+  const r = await get(f, url, BROWSER_UA, 2e4);
   const html = r.text;
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
   const scriptKb = scripts.reduce((a, m) => a + m[2].length, 0) / 1024;
@@ -1916,12 +1234,12 @@ async function renderCheck(url, f = fetch) {
   const stripped = html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<(script|style|noscript|template|svg|iframe)\b[\s\S]*?<\/\1>/gi, " ");
   const body = stripped.match(/<body\b[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? stripped;
   const hidden = [...body.matchAll(/<(\w+)\b[^>]*(?:\shidden(?:\s|=|>)|aria-hidden="true"|style="[^"]*display:\s*none)[^>]*>([\s\S]*?)<\/\1>/gi)].map((m) => textOf(m[2])).join(" ");
-  const text2 = textOf(body);
+  const text = textOf(body);
   const main = body.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i);
   const headings = [...body.matchAll(/<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi)].map((m) => ({ level: Number(m[1]), text: textOf(m[2]).slice(0, 120) })).filter((h) => h.text);
   const imgs = [...body.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
-  const attr = (re) => decode2(html.match(re)?.[1] ?? "").trim();
-  const w = words(text2);
+  const attr = (re) => decode(html.match(re)?.[1] ?? "").trim();
+  const w = words(text);
   const fw = frameworks(html);
   const shell = w < 150 && (scriptKb > 50 || /<div[^>]+id=["'](root|app|__next|__nuxt|svelte)["'][^>]*>\s*<\/div>/i.test(html));
   return {
@@ -1948,8 +1266,8 @@ async function renderCheck(url, f = fetch) {
     shell,
     gtm: /googletagmanager\.com\/gtm\.js|GTM-[A-Z0-9]{4,}/.test(html),
     hiddenWords: words(hidden),
-    textRatio: html.length ? text2.length / html.length : 0,
-    sample: text2.slice(0, 400)
+    textRatio: html.length ? text.length / html.length : 0,
+    sample: text.slice(0, 400)
   };
 }
 function renderMarkdown(r) {
@@ -1990,7 +1308,7 @@ function renderMarkdown(r) {
 }
 
 // src/agentready.ts
-var UA4 = "AlchemyAgent-Check/0.1 (+https://alchemyagent.ai)";
+var UA3 = "AlchemyAgent-Check/0.1 (+https://alchemyagent.ai)";
 var isHtml = (t) => /^\s*(<!doctype html|<html)/i.test(t.slice(0, 300));
 function lintLlmsTxt(txt) {
   const lines = txt.split(/\r?\n/);
@@ -2018,7 +1336,7 @@ var DISCOVERY = [
 async function sitemapInfo(origin, robotsTxt, f) {
   const listed = parseRobots(robotsTxt).sitemaps;
   for (const u of listed.length ? listed.slice(0, 2) : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`]) {
-    const r = await get(f, u, UA4, 12e3);
+    const r = await get(f, u, UA3, 12e3);
     if (challenged(r)) return { url: u, urls: 0, challenged: true };
     if (r.status !== 200 || !/<(urlset|sitemapindex)/i.test(r.text)) continue;
     const mods = [...r.text.matchAll(/<lastmod>\s*([^<\s]+)\s*<\/lastmod>/gi)].map((m) => m[1]).filter((d) => !isNaN(Date.parse(d))).sort();
@@ -2026,7 +1344,7 @@ async function sitemapInfo(origin, robotsTxt, f) {
     if (/<sitemapindex/i.test(r.text)) {
       const kids = [...r.text.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/gi)].map((m) => m[1]).slice(0, 5);
       const counts = await Promise.all(kids.map(async (k) => {
-        const c = await get(f, k, UA4, 12e3);
+        const c = await get(f, k, UA3, 12e3);
         return (c.text.match(/<url>/gi) ?? []).length;
       }));
       urls = counts.reduce((a, b) => a + b, 0);
@@ -2040,10 +1358,10 @@ async function agentReadiness(url, f = fetch) {
   const target = new URL(url);
   const origin = target.origin;
   const [llms, full, page, robots] = await Promise.all([
-    get(f, `${origin}/llms.txt`, UA4, 1e4),
-    get(f, `${origin}/llms-full.txt`, UA4, 1e4),
-    get(f, target.toString(), UA4, 15e3),
-    get(f, `${origin}/robots.txt`, UA4, 1e4)
+    get(f, `${origin}/llms.txt`, UA3, 1e4),
+    get(f, `${origin}/llms-full.txt`, UA3, 1e4),
+    get(f, target.toString(), UA3, 15e3),
+    get(f, `${origin}/robots.txt`, UA3, 1e4)
   ]);
   const state = (r) => challenged(r) ? "blocked" : r.status === 200 && !isHtml(r.text) && r.text.trim() ? "present" : "missing";
   const ls = state(llms);
@@ -2057,7 +1375,7 @@ async function agentReadiness(url, f = fetch) {
       brokenLinks.push(u);
       return;
     }
-    const r = await get(f, abs, UA4, 8e3);
+    const r = await get(f, abs, UA3, 8e3);
     if (r.status >= 400 && !challenged(r)) brokenLinks.push(`${u} (${r.status})`);
     if (r.status === 0) brokenLinks.push(`${u} (no response)`);
   }));
@@ -2066,12 +1384,12 @@ async function agentReadiness(url, f = fetch) {
   const path = target.pathname.replace(/\/$/, "");
   const mdCandidates = [path ? `${origin}${path}.md` : `${origin}/index.md`, `${origin}${path}/index.html.md`];
   const [neg, ...mds] = await Promise.all([
-    f(target.toString(), { headers: { accept: "text/markdown", "user-agent": UA4 } }).then(async (r) => ({ ct: r.headers.get("content-type") ?? "", ok: r.ok })).catch(() => ({ ct: "", ok: false })),
-    ...mdCandidates.map((u) => get(f, u, UA4, 8e3))
+    f(target.toString(), { headers: { accept: "text/markdown", "user-agent": UA3 } }).then(async (r) => ({ ct: r.headers.get("content-type") ?? "", ok: r.ok })).catch(() => ({ ct: "", ok: false })),
+    ...mdCandidates.map((u) => get(f, u, UA3, 8e3))
   ]);
   const mdIdx = mds.findIndex((r) => r.status === 200 && !isHtml(r.text) && /^#|\n#/.test(r.text));
   const discovery = await Promise.all(DISCOVERY.map(async ([p, label]) => {
-    const r = await get(f, origin + p, UA4, 8e3);
+    const r = await get(f, origin + p, UA3, 8e3);
     const found = challenged(r) ? null : r.status === 200 && !isHtml(r.text) && /^[\s\n]*[{[]/.test(r.text);
     return { path: p, label, found };
   }));
@@ -2127,13 +1445,13 @@ function agentReadyMarkdown(r) {
 }
 
 // src/wikipedia.ts
-var UA5 = "AlchemyAgent/0.2 (https://alchemyagent.ai; support@alchemyagent.ai)";
+var UA4 = "AlchemyAgent/0.2 (https://alchemyagent.ai; support@alchemyagent.ai)";
 var LANGS = ["en", "de", "fr", "es", "it", "ja", "pt", "nl", "pl", "zh"];
 async function json(f, url) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 15e3);
   try {
-    const r = await f(url, { headers: { "user-agent": UA5, "api-user-agent": UA5, accept: "application/json" }, signal: ctl.signal });
+    const r = await f(url, { headers: { "user-agent": UA4, "api-user-agent": UA4, accept: "application/json" }, signal: ctl.signal });
     return r.ok ? await r.json() : null;
   } catch {
     return null;
@@ -2177,8 +1495,8 @@ async function wikipediaCheck(domain, articleUrl, f = fetch, langs = LANGS) {
     const start = new Date(end);
     start.setUTCDate(1);
     start.setUTCMonth(start.getUTCMonth() - 11);
-    const fmt3 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
-    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt3(start)}/${fmt3(end)}`);
+    const fmt2 = (x) => x.toISOString().slice(0, 10).replace(/-/g, "") + "00";
+    const pv = await json(f, `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${m[1]}.wikipedia/all-access/user/${m[2]}/monthly/${fmt2(start)}/${fmt2(end)}`);
     out.pageviews = pv ? { title: decodeURIComponent(m[2]).replace(/_/g, " "), lang: m[1], months: (pv.items ?? []).map((i) => ({ month: String(i.timestamp).slice(0, 6), views: Number(i.views) || 0 })) } : null;
   }
   return out;
@@ -2221,10 +1539,10 @@ async function gdelt(f, params, deadline) {
     const t = setTimeout(() => ctl.abort(), left);
     try {
       const r = await f(`${BASE}?${q}`, { headers: { "user-agent": "AlchemyAgent/0.2 (+https://alchemyagent.ai)" }, signal: ctl.signal });
-      const text2 = await r.text();
-      if (r.ok && /^\s*\{/.test(text2)) return JSON.parse(text2);
-      if (r.ok && !text2.trim()) return {};
-      if (!(/one every 5 seconds/i.test(text2) || r.status === 429)) throw new Error(text2.trim().slice(0, 200) || `GDELT returned ${r.status}`);
+      const text = await r.text();
+      if (r.ok && /^\s*\{/.test(text)) return JSON.parse(text);
+      if (r.ok && !text.trim()) return {};
+      if (!(/one every 5 seconds/i.test(text) || r.status === 429)) throw new Error(text.trim().slice(0, 200) || `GDELT returned ${r.status}`);
     } catch (e) {
       if (!(e instanceof TypeError) && !(e instanceof Error && e.name === "AbortError")) throw e;
     } finally {
@@ -2284,12 +1602,12 @@ function newsMarkdown(r, limit = 20) {
 }
 
 // src/community.ts
-var UA6 = "AlchemyAgent/0.2 (+https://alchemyagent.ai)";
+var UA5 = "AlchemyAgent/0.2 (+https://alchemyagent.ai)";
 async function json2(f, url) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 15e3);
   try {
-    const r = await f(url, { headers: { "user-agent": UA6, accept: "application/json" }, signal: ctl.signal });
+    const r = await f(url, { headers: { "user-agent": UA5, accept: "application/json" }, signal: ctl.signal });
     const body = await r.json().catch(() => null);
     if (!r.ok) throw new Error(body?.error_message ?? body?.message ?? `HTTP ${r.status}`);
     return body;
@@ -2301,11 +1619,11 @@ var strip = (s) => s.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"').replace(/&#
 async function hackerNews(f, brand, domain) {
   const since = Math.floor(Date.now() / 1e3) - 365 * 86400;
   const q = encodeURIComponent(`"${brand}"`);
-  const [text2, links] = await Promise.all([
+  const [text, links] = await Promise.all([
     json2(f, `https://hn.algolia.com/api/v1/search_by_date?query=${q}&tags=(story,comment)&numericFilters=created_at_i>${since}&hitsPerPage=15`),
     domain ? json2(f, `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(domain)}&restrictSearchableAttributes=url&tags=story&hitsPerPage=20`) : Promise.resolve(null)
   ]);
-  const items = [...text2?.hits ?? [], ...(links?.hits ?? []).slice(0, 5)].map((h) => ({
+  const items = [...text?.hits ?? [], ...(links?.hits ?? []).slice(0, 5)].map((h) => ({
     title: strip(h.title ?? h.story_title ?? (h.comment_text ?? "").slice(0, 120)),
     url: `https://news.ycombinator.com/item?id=${h.objectID}`,
     date: String(h.created_at ?? "").slice(0, 10),
@@ -2315,12 +1633,12 @@ async function hackerNews(f, brand, domain) {
     kind: h._tags?.includes("comment") ? "comment" : "story"
   }));
   const seen = /* @__PURE__ */ new Set();
-  return { mentions: text2?.nbHits ?? 0, linking: links?.nbHits ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) };
+  return { mentions: text?.nbHits ?? 0, linking: links?.nbHits ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) };
 }
 async function stackExchange(f, brand, domain, sites) {
   const out = [];
   for (const site of sites) {
-    const [text2, links] = await Promise.all([
+    const [text, links] = await Promise.all([
       json2(f, `https://api.stackexchange.com/2.3/search/excerpts?order=desc&sort=relevance&q=${encodeURIComponent(`"${brand}"`)}&site=${site}&pagesize=15&filter=total`).catch(() => null),
       domain ? json2(f, `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=votes&url=${encodeURIComponent(`*${domain}*`)}&site=${site}&pagesize=10`).catch(() => null) : Promise.resolve(null)
     ]);
@@ -2335,7 +1653,7 @@ async function stackExchange(f, brand, domain, sites) {
       kind: i.item_type ?? "question"
     }));
     const seen = /* @__PURE__ */ new Set();
-    out.push({ site, mentions: text2?.total ?? list?.items?.length ?? 0, linking: links?.items?.length ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) });
+    out.push({ site, mentions: text?.total ?? list?.items?.length ?? 0, linking: links?.items?.length ?? 0, items: items.filter((i) => !seen.has(i.url) && seen.add(i.url)) });
   }
   return out;
 }
@@ -2424,7 +1742,7 @@ function braveMarkdown(domain, rows, country) {
 }
 
 // src/osm.ts
-var UA7 = "AlchemyAgent/0.2 (https://alchemyagent.ai; support@alchemyagent.ai)";
+var UA6 = "AlchemyAgent/0.2 (https://alchemyagent.ai; support@alchemyagent.ai)";
 var digits = (s = "") => s.replace(/\D/g, "").slice(-10);
 var norm2 = (s = "") => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim();
 var hostOf = (u = "") => {
@@ -2436,7 +1754,7 @@ var hostOf = (u = "") => {
 };
 async function osmLookup(name, location, website, phone, f = fetch) {
   const q = new URLSearchParams({ q: `${name}, ${location}`, format: "jsonv2", addressdetails: "1", extratags: "1", namedetails: "1", limit: "5" });
-  const r = await f(`https://nominatim.openstreetmap.org/search?${q}`, { headers: { "user-agent": UA7, "accept-language": "en" } });
+  const r = await f(`https://nominatim.openstreetmap.org/search?${q}`, { headers: { "user-agent": UA6, "accept-language": "en" } });
   if (r.status === 429 || r.status === 403) throw new Error("OpenStreetMap's Nominatim service is limiting requests from this network. Try again in a minute.");
   if (!r.ok) throw new Error(`Nominatim returned HTTP ${r.status}`);
   const list = await r.json();
@@ -2589,7 +1907,7 @@ function authorityMarkdown(rows, hasOpr) {
 }
 
 // src/prompts.ts
-var msg = (text2) => ({ messages: [{ role: "user", content: { type: "text", text: text2 } }] });
+var msg = (text) => ({ messages: [{ role: "user", content: { type: "text", text } }] });
 var REPORT_RULES = [
   "Report rules:",
   "- Lead with a 3-line summary: what's working, the biggest risk, the single best next step.",
@@ -2597,8 +1915,9 @@ var REPORT_RULES = [
   "- Quote the evidence for each fix from the tool results (numbers, URLs). Don't invent data; if a tool failed or was blocked, say so and move on.",
   "- Keep it plain English for a marketing lead. No filler."
 ].join("\n");
-function registerPrompts(server2, remote, pro = !remote) {
+function registerPrompts(server2, remote, pro = !remote, hostedData = false) {
   const local = (tools) => remote ? "" : tools;
+  const own = (text) => !remote || hostedData ? text : "";
   server2.registerPrompt(
     "ai_search_audit",
     {
@@ -2618,18 +1937,18 @@ function registerPrompts(server2, remote, pro = !remote) {
       `6. entity_check and wikipedia_presence for the brand`,
       `7. authority_check for the domain`,
       local(`8. common_crawl_check, news_mentions and community_mentions for the brand`),
-      local(`9. If Search Console is connected (gsc_sites works), gsc_ai_queries for the last 90 days; if GA4 is connected, ga4_report by ai_assistants`),
+      own(`9. If Search Console is connected (gsc_sites works), gsc_ai_queries for the last 90 days; if GA4 is connected, ga4_report by ai_assistants; if Bing is connected, bing_webmaster`),
       "",
       REPORT_RULES,
       "- Group fixes under: Access (can AI reach it), Readability (can AI read it), Identity (does AI know who you are), Authority (does AI trust you), Speed.",
-      local("- End with one line on which of the user's own data sources aren't connected yet (run data_connections) and what connecting them would add to this audit.")
+      own("- End with one line on which of the user's own data sources aren't connected yet (run data_connections) and what connecting them would add to this audit.")
     ].filter(Boolean).join("\n"))
   );
   if (!remote) server2.registerPrompt(
     "connect_your_data",
     {
-      title: "Connect your data",
-      description: "Set up Search Console, Bing Webmaster Tools and Cloudflare so AlchemyAgent can rank fixes by your real traffic and crawler data.",
+      title: "Start here: connect your data",
+      description: "First run: connect Google Search Console and GA4 (one Google sign-in), Bing Webmaster Tools and Cloudflare so AlchemyAgent can rank fixes by your real traffic and crawler data.",
       argsSchema: {}
     },
     () => msg([
@@ -2640,6 +1959,22 @@ function registerPrompts(server2, remote, pro = !remote) {
       "3. When Search Console has an OAuth client but no sign-in, run gsc_connect.",
       "4. After each connection, run one quick check that uses it (gsc_sites, ga4_report, bing_webmaster, log_file_analysis) to confirm it works, and tell me one thing it found.",
       "Never ask me to paste a key into the chat: keys go in AlchemyAgent's settings."
+    ].join("\n"))
+  );
+  else if (hostedData) server2.registerPrompt(
+    "connect_your_data",
+    {
+      title: "Start here: connect your data",
+      description: "First run: connect Google Search Console and GA4 (one Google sign-in) and Bing Webmaster Tools to your AlchemyAgent account so fixes get ranked by your real traffic and queries.",
+      argsSchema: {}
+    },
+    () => msg([
+      "Help me connect my own data to AlchemyAgent.",
+      "",
+      "1. Run data_connections, show me what's connected, and give me the private connect link it returns.",
+      "2. Tell me in one line each what Google (Search Console and GA4, one sign-in) and Bing Webmaster Tools add.",
+      "3. When I say I'm done, run one quick check per new connection (gsc_sites, ga4_report with no property, bing_webmaster with no site) to confirm it works, and tell me one thing it found.",
+      "Never ask me to paste a key or password into the chat: the connect page handles that."
     ].join("\n"))
   );
   server2.registerPrompt(
@@ -2810,15 +2145,15 @@ function registerPrompts(server2, remote, pro = !remote) {
 }
 
 // src/alerts.ts
-import { mkdir as mkdir2, readFile, writeFile as writeFile2 } from "node:fs/promises";
-import { homedir as homedir2, platform } from "node:os";
-import { join as join2 } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-var UA8 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-var ALERTS_DIR = () => join2(homedir2(), ".alchemyagent", "alerts");
+var UA7 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+var ALERTS_DIR = () => join(homedir(), ".alchemyagent", "alerts");
 var hash = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
-var decode3 = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/<[^>]+>/g, "").trim();
+var decode2 = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/<[^>]+>/g, "").trim();
 var tag = (xml, name) => xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, "i"))?.[1] ?? "";
 var slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "brand";
 var host3 = (u) => {
@@ -2832,7 +2167,7 @@ async function getText2(f, url, ms = 15e3) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
   try {
-    const r = await f(url, { headers: { "user-agent": UA8, accept: "application/rss+xml, application/atom+xml, text/html;q=0.9, */*;q=0.8" }, redirect: "follow", signal: ctl.signal });
+    const r = await f(url, { headers: { "user-agent": UA7, accept: "application/rss+xml, application/atom+xml, text/html;q=0.9, */*;q=0.8" }, redirect: "follow", signal: ctl.signal });
     return { status: r.status, text: await r.text(), url: r.url || url };
   } catch {
     return { status: 0, text: "", url };
@@ -2843,23 +2178,23 @@ async function getText2(f, url, ms = 15e3) {
 function parseGoogleNews(xml) {
   return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].map((m) => {
     const it = m[1];
-    const outlet = decode3(tag(it, "source"));
-    const title = decode3(tag(it, "title")).replace(new RegExp(`\\s+-\\s+${outlet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "");
-    const d = Date.parse(decode3(tag(it, "pubDate")));
-    return { source: "Google News", title, url: decode3(tag(it, "link")), outlet: outlet || host3(it.match(/<source[^>]*url="([^"]+)"/i)?.[1] ?? ""), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
+    const outlet = decode2(tag(it, "source"));
+    const title = decode2(tag(it, "title")).replace(new RegExp(`\\s+-\\s+${outlet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "");
+    const d = Date.parse(decode2(tag(it, "pubDate")));
+    return { source: "Google News", title, url: decode2(tag(it, "link")), outlet: outlet || host3(it.match(/<source[^>]*url="([^"]+)"/i)?.[1] ?? ""), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
   });
 }
 function parseGoogleAlerts(xml) {
   return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((m) => {
     const e = m[1];
-    const raw = decode3(e.match(/<link[^>]*href="([^"]+)"/i)?.[1] ?? "");
+    const raw = decode2(e.match(/<link[^>]*href="([^"]+)"/i)?.[1] ?? "");
     let url = raw;
     try {
       url = new URL(raw).searchParams.get("url") ?? raw;
     } catch {
     }
-    const d = Date.parse(decode3(tag(e, "published")) || decode3(tag(e, "updated")));
-    return { source: "Google Alerts", title: decode3(tag(e, "title")), url, outlet: host3(url), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
+    const d = Date.parse(decode2(tag(e, "published")) || decode2(tag(e, "updated")));
+    return { source: "Google Alerts", title: decode2(tag(e, "title")), url, outlet: host3(url), date: isNaN(d) ? "" : new Date(d).toISOString().slice(0, 10) };
   });
 }
 async function linksTo(f, url, domain) {
@@ -2871,15 +2206,15 @@ async function linksTo(f, url, domain) {
 }
 async function loadState(brand) {
   try {
-    return JSON.parse(await readFile(join2(ALERTS_DIR(), `${slug(brand)}.json`), "utf8"));
+    return JSON.parse(await readFile(join(ALERTS_DIR(), `${slug(brand)}.json`), "utf8"));
   } catch {
     return { brand, feeds: [], seen: {} };
   }
 }
 async function saveState(s) {
-  await mkdir2(ALERTS_DIR(), { recursive: true, mode: 448 });
+  await mkdir(ALERTS_DIR(), { recursive: true, mode: 448 });
   const entries = Object.entries(s.seen).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 5e3);
-  await writeFile2(join2(ALERTS_DIR(), `${slug(s.brand)}.json`), JSON.stringify({ ...s, seen: Object.fromEntries(entries) }, null, 2), { mode: 384 });
+  await writeFile(join(ALERTS_DIR(), `${slug(s.brand)}.json`), JSON.stringify({ ...s, seen: Object.fromEntries(entries) }, null, 2), { mode: 384 });
 }
 async function checkAlerts(opts, f = fetch) {
   const state = await loadState(opts.brand);
@@ -2935,9 +2270,9 @@ async function checkAlerts(opts, f = fetch) {
 }
 function notifyDesktop(title, body) {
   if (platform() !== "darwin") return;
-  const esc2 = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
+  const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').slice(0, 200);
   try {
-    spawn("osascript", ["-e", `display notification "${esc2(body)}" with title "${esc2(title)}"`], { stdio: "ignore", detached: true }).unref();
+    spawn("osascript", ["-e", `display notification "${esc(body)}" with title "${esc(title)}"`], { stdio: "ignore", detached: true }).unref();
   } catch {
   }
 }
@@ -2967,9 +2302,9 @@ function alertsMarkdown(r, limit = 25) {
 }
 
 // src/server.ts
-var BROWSER_UA3 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+var BROWSER_UA2 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 async function homepageSameAs(origin, f) {
-  const r = await get(f, origin + "/", BROWSER_UA3);
+  const r = await get(f, origin + "/", BROWSER_UA2);
   if (r.status !== 200 || challenged(r)) return null;
   const out = [];
   for (const m of r.text.matchAll(/<script\b[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
@@ -2994,18 +2329,46 @@ async function botBlocked(origin, token, f) {
   if (r.status !== 200) return false;
   return !isAllowed(rulesFor(parseRobots(r.text), token).rules, "/").allowed;
 }
-var VERSION = "0.5.0";
+var VERSION = "0.5.1";
 var DEFAULT_API_BASE = "https://api.alchemyagent.ai";
+function serverInstructions(opts) {
+  const base = "AlchemyAgent checks how a website shows up in AI search and Google: AI crawler access, what AI sees, speed, schema, entity and authority.";
+  const unlock = [
+    "- Google Search Console: real Google queries, clicks and positions, including the queries that come from AI assistants.",
+    "- Google Analytics 4 (same Google sign-in): sessions and key events by channel and landing page, including referrals from ChatGPT, Perplexity, Claude and Gemini.",
+    "- Bing Webmaster Tools: Bing traffic, queries and index health; Bing's index also feeds Microsoft Copilot and other AI assistants."
+  ].join("\n");
+  if (opts.remote && !opts.hostedData) return `${base} This free connector has no account, so it only checks public pages. On a new user's first request, answer it, then add one short line that their own Search Console, GA4 and Bing Webmaster Tools data can be connected with an AlchemyAgent account (data_connections explains how). Don't repeat it in later replies.`;
+  const how = opts.hostedData ? "Call data_connections: it shows what is connected and returns a private connect link (valid 24 hours). Share that link as is; the user signs in with Google once for Search Console and GA4, and pastes a Bing API key on the same page. Never ask for keys or passwords in the chat." : "Call data_connections: it shows what is connected and how to add the rest. The connect_your_data prompt walks through it step by step. Keys go in AlchemyAgent's settings, never in the chat.";
+  return [
+    base,
+    "",
+    "Onboarding: on a new user's first request, call data_connections before or alongside the tools the question needs. In your first reply, if Google or Bing isn't connected yet, invite the user to connect Google Search Console and GA4 (one Google sign-in) and Bing Webmaster Tools, with one line each on what it unlocks:",
+    unlock,
+    how,
+    "Then answer their question anyway with the tools that work without a connection. Mention connecting only once per conversation, and skip it when everything is already connected.",
+    "When a Search Console, GA4 or Bing tool says it isn't connected, call data_connections and give the user the next step."
+  ].join("\n");
+}
 var errorResult = (e) => ({ isError: true, content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }] });
 function createServer(opts = {}) {
-  const apiBase = (opts.apiBase ?? DEFAULT_API_BASE).replace(/\/$/, "");
+  const apiBase2 = (opts.apiBase ?? DEFAULT_API_BASE).replace(/\/$/, "");
   const f = opts.fetchFn ?? fetch;
-  const psi = { apiBase, apiKey: opts.psiKey, fetchFn: f };
-  const server2 = new McpServer({ name: "alchemyagent", version: VERSION });
+  const psi = { apiBase: apiBase2, apiKey: opts.psiKey, fetchFn: f };
+  const server2 = new McpServer({ name: "alchemyagent", version: VERSION }, { instructions: serverInstructions(opts) });
   const clean2 = (r) => opts.remote && r?.content ? { ...r, content: r.content.map((c) => c.type === "text" ? { ...c, text: c.text.split("\n").filter((l) => !l.startsWith("AlchemyAgent Pro")).join("\n").trimEnd() } : c) } : r;
-  const register = ((name, cfg, cb) => server2.registerTool(name, { ...cfg, annotations: { title: cfg.title, ...cfg.annotations } }, async (...a) => clean2(await cb(...a))));
+  const register = ((name, cfg, cb) => server2.registerTool(name, { ...cfg, annotations: { title: cfg.title, ...cfg.annotations } }, async (...a) => {
+    try {
+      const r = clean2(await cb(...a));
+      opts.track?.(name, !r?.isError);
+      return r;
+    } catch (e) {
+      opts.track?.(name, false);
+      throw e;
+    }
+  }));
   async function api(path) {
-    const res = await f(`${apiBase}${path}`, { headers: { accept: "application/json" } });
+    const res = await f(`${apiBase2}${path}`, { headers: { accept: "application/json" } });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body?.error?.message ?? `AlchemyAgent API returned ${res.status}`);
     return body;
@@ -3119,14 +2482,14 @@ function createServer(opts = {}) {
     },
     async ({ csv_path, csv_text }) => {
       try {
-        let text2 = csv_text;
-        if (!text2 && csv_path && opts.remote) throw new Error("This hosted version can't read files. Paste the contents of Queries.csv as csv_text.");
-        if (!text2 && csv_path) {
+        let text = csv_text;
+        if (!text && csv_path && opts.remote) throw new Error("This hosted version can't read files. Paste the contents of Queries.csv as csv_text.");
+        if (!text && csv_path) {
           const { readFile: readFile2 } = await import("node:fs/promises");
-          text2 = await readFile2(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
+          text = await readFile2(csv_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8");
         }
-        if (!text2) throw new Error("Pass csv_path (the Queries.csv from a Search Console export) or csv_text.");
-        const rows = rowsFromCsv(text2);
+        if (!text) throw new Error("Pass csv_path (the Queries.csv from a Search Console export) or csv_text.");
+        const rows = rowsFromCsv(text);
         if (!rows.length) throw new Error("No query rows found in that CSV.");
         return { content: [{ type: "text", text: classifyMarkdown(classify(rows)) }] };
       } catch (e) {
@@ -3158,7 +2521,7 @@ function createServer(opts = {}) {
     }
   );
   const ro = { readOnlyHint: true, openWorldHint: true };
-  const run = (fn) => fn().then((text2) => ({ content: [{ type: "text", text: text2 }] }), errorResult);
+  const run = (fn) => fn().then((text) => ({ content: [{ type: "text", text }] }), errorResult);
   register(
     "ai_render_check",
     {
@@ -3204,6 +2567,13 @@ function createServer(opts = {}) {
     },
     async ({ domains }) => run(async () => authorityMarkdown(await authority(domains, f, opts.remote ? void 0 : opts.oprKey), !opts.remote && !!opts.oprKey))
   );
+  const gscCreds = opts.hostedData ? { getToken: () => opts.hostedData.googleToken() } : opts.gsc ?? {};
+  const property = async (site) => {
+    const sites = await listSites(gscCreds, f);
+    const p = matchProperty(sites, site);
+    if (!p) throw new Error(`${site} isn't a Search Console property this account can read. Properties: ${sites.map((s) => s.siteUrl).join(", ") || "none"}.`);
+    return p;
+  };
   if (!opts.remote) {
     register(
       "wayback_history",
@@ -3316,13 +2686,6 @@ function createServer(opts = {}) {
       },
       async ({ business_name, location, url, phone }) => run(async () => osmMarkdown(business_name, location, await osmLookup(business_name, location, url, phone, f), url))
     );
-    const gscCreds = opts.gsc ?? {};
-    const property = async (site) => {
-      const sites = await listSites(gscCreds, f);
-      const p = matchProperty(sites, site);
-      if (!p) throw new Error(`${site} isn't a Search Console property this account can read. Properties: ${sites.map((s) => s.siteUrl).join(", ") || "none"}.`);
-      return p;
-    };
     register(
       "gsc_connect",
       {
@@ -3343,65 +2706,6 @@ function createServer(opts = {}) {
           "",
           `If Google shows "Google hasn't verified this app", that's your own Google Cloud project in testing mode: click Continue.`
         ].join("\n");
-      })
-    );
-    register(
-      "gsc_sites",
-      {
-        title: "Search Console properties",
-        description: "List the Search Console properties the connected Google account can read, with permission levels, and the connection status. Uses the Search Console API (https://developers.google.com/webmaster-tools).",
-        inputSchema: {},
-        annotations: ro
-      },
-      async () => run(async () => {
-        const status = await connectionStatus(gscCreds);
-        const sites = await listSites(gscCreds, f);
-        return [`## Search Console properties`, status, "", ...sites.length ? sites.map((s) => `- ${s.siteUrl} (${s.permissionLevel.replace(/^site/, "").toLowerCase()})`) : ["No properties. Add the account or service account as a user in Search Console > Settings > Users and permissions."]].join("\n");
-      })
-    );
-    register(
-      "gsc_performance",
-      {
-        title: "Search Console performance",
-        description: "Read Google Search Console performance (clicks, impressions, CTR, position) for a property, grouped by query, page, date, country or device, with an optional comparison to the previous period of the same length and contains-filters on query or page. Handles up to 100,000 rows. Uses the Search Console Search Analytics API (https://developers.google.com/webmaster-tools/v1/searchanalytics/query).",
-        inputSchema: {
-          site: external_exports.string().describe("Property URL or domain, e.g. https://example.com/ or sc-domain:example.com or example.com"),
-          dimensions: external_exports.array(external_exports.enum(["query", "page", "date", "country", "device"])).min(1).max(3).default(["query"]),
-          days: external_exports.number().int().min(1).max(480).default(28).describe("Length of the period, ending ~2 days ago (GSC data lag)"),
-          compare: external_exports.boolean().default(true).describe("Also fetch the previous period of the same length"),
-          query_contains: external_exports.string().optional(),
-          page_contains: external_exports.string().optional(),
-          search_type: external_exports.enum(["web", "image", "video", "news", "discover", "googleNews"]).default("web"),
-          row_limit: external_exports.number().int().min(1).max(1e5).default(1e3),
-          show: external_exports.number().int().min(1).max(200).default(25).describe("Rows to show in the table")
-        },
-        annotations: ro
-      },
-      async ({ site, dimensions, days, compare, query_contains, page_contains, search_type, row_limit, show }) => run(async () => {
-        const prop = await property(site);
-        const range = dateRange(days);
-        const o = { dimensions, rowLimit: row_limit, queryContains: query_contains, pageContains: page_contains, type: search_type };
-        const rows = await searchAnalytics(gscCreds, prop, { ...range, ...o }, f);
-        const prev = compare && !dimensions.includes("date") ? await searchAnalytics(gscCreds, prop, { ...dateRange(days, days + 2), ...o }, f) : null;
-        return rowsMarkdown(prop, range, dimensions, rows, prev, show);
-      })
-    );
-    register(
-      "gsc_ai_queries",
-      {
-        title: "AI-assistant queries from Search Console",
-        description: "Pull up to 25,000 queries straight from the user's Search Console and find the ones that look like they came from AI assistants (conversational prompts, AI tracker probes, pivots, pasted strings). Same rules as gsc_query_classifier, without exporting a CSV. Candidates are returned for you to judge.",
-        inputSchema: { site: external_exports.string().describe("Property URL or domain"), days: external_exports.number().int().min(7).max(480).default(90) },
-        annotations: ro
-      },
-      async ({ site, days }) => run(async () => {
-        const prop = await property(site);
-        const range = dateRange(days);
-        const rows = await searchAnalytics(gscCreds, prop, { ...range, dimensions: ["query"], rowLimit: 25e3 }, f);
-        const md = classifyMarkdown(classify(rows.map((r) => ({ query: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }))));
-        return `${prop}, ${range.startDate} to ${range.endDate}
-
-${md}`;
       })
     );
     register(
@@ -3440,42 +2744,6 @@ ${md}`;
       })
     );
     register(
-      "ga4_report",
-      {
-        title: "Google Analytics 4 report",
-        description: "Read the user's own Google Analytics 4 data with their Google sign-in: sessions, engaged sessions, key events and revenue for the last N days vs the N days before, by channel, landing page, source, or AI assistant referrals (ChatGPT, Perplexity, Claude, Gemini, Copilot and more). Call without property to list the GA4 properties the account can read. Uses the Google Analytics Data API (https://developers.google.com/analytics/devguides/reporting/data/v1).",
-        inputSchema: {
-          property: external_exports.string().optional().describe("GA4 property name or ID (or the site's domain). Omit to list properties."),
-          by: external_exports.enum(["channel", "landing_page", "source", "ai_assistants"]).default("channel").describe("How to group sessions"),
-          days: external_exports.number().int().min(7).max(365).default(28).describe("Days to report (compared with the same number of days before)"),
-          limit: external_exports.number().int().min(5).max(100).default(20).describe("Rows to show")
-        },
-        annotations: { readOnlyHint: true, openWorldHint: true }
-      },
-      async ({ property: property2, by, days, limit }) => {
-        try {
-          const creds = opts.gsc ?? {};
-          const props = await listProperties(creds, f);
-          if (!property2) return { content: [{ type: "text", text: propertiesMarkdown(props) }] };
-          const p = matchGa4(props, property2);
-          if (!p) throw new Error(`${property2} isn't a GA4 property this account can read. ${props.length ? "Properties: " + props.map((x) => `${x.name} (${x.id})`).join(", ") : ""}`);
-          return { content: [{ type: "text", text: ga4Markdown(await ga4Report(creds, p, by, days, f), limit) }] };
-        } catch (e) {
-          return errorResult(e);
-        }
-      }
-    );
-    register(
-      "data_connections",
-      {
-        title: "Connect your data (setup status)",
-        description: "Show which of the user's own data sources AlchemyAgent can use (Google Search Console, Bing Webmaster Tools, Cloudflare logs, Brave Search, PageSpeed key; GA4 coming soon), why each one matters, and exactly how to connect the missing ones. Use this first with a new user, when a tool needs a key that isn't set, or when someone asks how to get better, data-driven recommendations.",
-        inputSchema: {},
-        annotations: { readOnlyHint: true, openWorldHint: false }
-      },
-      async () => ({ content: [{ type: "text", text: connectionsMarkdown({ ...connState(opts, TOKEN_FILE), ga4: await hasScope(opts.gsc ?? {}, GA4_SCOPE).catch(() => false) }) }] })
-    );
-    register(
       "featured_image",
       {
         title: "Featured image generator (data card)",
@@ -3508,8 +2776,8 @@ ${md}`;
       async (a) => {
         try {
           const r = await renderFeatured({ headline: a.headline, subhead: a.subhead, eyebrow: a.eyebrow, source: a.source, site: a.site, brand: a.brand, logoSvg: a.logo_svg, background: a.background, ink: a.ink, accent: a.accent, headingFont: a.heading_font, bodyFont: a.body_font, card: a.card }, a.out_dir, a.file_name ?? a.headline, a.credit !== false);
-          const text2 = [r.png ? `Saved ${r.png} (2400x1260) and its source ${r.html}.` : `Wrote ${r.html}.`, r.note ?? "", a.credit !== false && r.png ? `The PNG's metadata includes an invisible credit ("Created with AlchemyAgent"); nothing is drawn on the image. Pass credit: false to leave it out.` : "", "Upload it as the post's featured image (most SEO plugins also use it as og:image) and write alt text that states what the chart shows, with the numbers."].filter(Boolean).join("\n");
-          const content = [{ type: "text", text: text2 }];
+          const text = [r.png ? `Saved ${r.png} (2400x1260) and its source ${r.html}.` : `Wrote ${r.html}.`, r.note ?? "", a.credit !== false && r.png ? `The PNG's metadata includes an invisible credit ("Created with AlchemyAgent"); nothing is drawn on the image. Pass credit: false to leave it out.` : "", "Upload it as the post's featured image (most SEO plugins also use it as og:image) and write alt text that states what the chart shows, with the numbers."].filter(Boolean).join("\n");
+          const content = [{ type: "text", text }];
           if (r.png) content.push({ type: "image", data: (await (await import("node:fs/promises")).readFile(r.png)).toString("base64"), mimeType: "image/png" });
           return { content };
         } catch (e) {
@@ -3551,8 +2819,8 @@ ${md}`;
       async ({ url, json_path, max_issues }) => {
         try {
           if (!url && !json_path) throw new Error("Give a url (e.g. example.com) or a json_path to a local entitymap.json.");
-          const text2 = json_path ? await (await import("node:fs/promises")).readFile(json_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8") : void 0;
-          const r = await entitymapCheck(url ?? "", f, text2);
+          const text = json_path ? await (await import("node:fs/promises")).readFile(json_path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "utf8") : void 0;
+          const r = await entitymapCheck(url ?? "", f, text);
           if (json_path && !url) r.jsonUrl = json_path;
           return { content: [{ type: "text", text: entitymapMarkdown(r, max_issues) }] };
         } catch (e) {
@@ -3598,7 +2866,7 @@ ${md}`;
         try {
           if (!opts.licenseKey) throw new Error(PRO_HELP);
           const ok = [], failed = [];
-          const results = await Promise.allSettled(urls.map((u) => rateQuality(f, apiBase, opts.licenseKey, normalizeUrl(u), context)));
+          const results = await Promise.allSettled(urls.map((u) => rateQuality(f, apiBase2, opts.licenseKey, normalizeUrl(u), context)));
           results.forEach((r, i) => r.status === "fulfilled" ? ok.push(r.value) : failed.push({ url: urls[i], error: r.reason instanceof Error ? r.reason.message : String(r.reason) }));
           if (!ok.length) throw new Error(failed.map((x) => `${x.url}: ${x.error}`).join("\n"));
           return { content: [{ type: "text", text: qualityMarkdown(ok, failed) }] };
@@ -3634,7 +2902,7 @@ ${md}`;
         let job = linkJobs.get(key);
         const fresh = job?.result && Date.now() - job.started < 12 * 36e5;
         if (!job || job.error || a.refresh && job.result || job.result && !fresh) {
-          const v = await verifyPro(f, apiBase, opts.licenseKey, "internal_links");
+          const v = await verifyPro(f, apiBase2, opts.licenseKey, "internal_links");
           let gsc = null, gscProperty;
           if (gscCreds.serviceAccountFile || gscCreds.clientId && gscCreds.clientSecret) {
             try {
@@ -3690,6 +2958,110 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
         return `Still running (${Math.round((Date.now() - job.started) / 1e3)} s so far): ${pr.phase}${pr.total ? ` ${pr.done} of ${pr.total}` : ""}. Call internal_links again with the same site in about a minute to get the plan.`;
       })
     );
+  }
+  const hosted = opts.hostedData;
+  if (!opts.remote || hosted) {
+    const bingKey = async () => {
+      if (hosted) return hosted.bingKey();
+      if (!opts.bingKey) throw new Error(BING_KEY_HELP);
+      return opts.bingKey;
+    };
+    const gscStatus = async () => hosted ? "Connected through your AlchemyAgent account (read-only)." : connectionStatus(gscCreds);
+    register(
+      "gsc_sites",
+      {
+        title: "Search Console properties",
+        description: "List the Search Console properties the connected Google account can read, with permission levels, and the connection status. Uses the Search Console API (https://developers.google.com/webmaster-tools).",
+        inputSchema: {},
+        annotations: ro
+      },
+      async () => run(async () => {
+        const sites = await listSites(gscCreds, f);
+        const status = await gscStatus();
+        return [`## Search Console properties`, status, "", ...sites.length ? sites.map((s) => `- ${s.siteUrl} (${s.permissionLevel.replace(/^site/, "").toLowerCase()})`) : ["No properties. Add the account or service account as a user in Search Console > Settings > Users and permissions."]].join("\n");
+      })
+    );
+    register(
+      "gsc_performance",
+      {
+        title: "Search Console performance",
+        description: "Read Google Search Console performance (clicks, impressions, CTR, position) for a property, grouped by query, page, date, country or device, with an optional comparison to the previous period of the same length and contains-filters on query or page. Handles up to 100,000 rows. Uses the Search Console Search Analytics API (https://developers.google.com/webmaster-tools/v1/searchanalytics/query).",
+        inputSchema: {
+          site: external_exports.string().describe("Property URL or domain, e.g. https://example.com/ or sc-domain:example.com or example.com"),
+          dimensions: external_exports.array(external_exports.enum(["query", "page", "date", "country", "device"])).min(1).max(3).default(["query"]),
+          days: external_exports.number().int().min(1).max(480).default(28).describe("Length of the period, ending ~2 days ago (GSC data lag)"),
+          compare: external_exports.boolean().default(true).describe("Also fetch the previous period of the same length"),
+          query_contains: external_exports.string().optional(),
+          page_contains: external_exports.string().optional(),
+          search_type: external_exports.enum(["web", "image", "video", "news", "discover", "googleNews"]).default("web"),
+          row_limit: external_exports.number().int().min(1).max(1e5).default(1e3),
+          show: external_exports.number().int().min(1).max(200).default(25).describe("Rows to show in the table")
+        },
+        annotations: ro
+      },
+      async ({ site, dimensions, days, compare, query_contains, page_contains, search_type, row_limit, show }) => run(async () => {
+        const prop = await property(site);
+        const range = dateRange(days);
+        const o = { dimensions, rowLimit: row_limit, queryContains: query_contains, pageContains: page_contains, type: search_type };
+        const rows = await searchAnalytics(gscCreds, prop, { ...range, ...o }, f);
+        const prev = compare && !dimensions.includes("date") ? await searchAnalytics(gscCreds, prop, { ...dateRange(days, days + 2), ...o }, f) : null;
+        return rowsMarkdown(prop, range, dimensions, rows, prev, show);
+      })
+    );
+    register(
+      "gsc_ai_queries",
+      {
+        title: "AI-assistant queries from Search Console",
+        description: "Pull up to 25,000 queries straight from the user's Search Console and find the ones that look like they came from AI assistants (conversational prompts, AI tracker probes, pivots, pasted strings). Same rules as gsc_query_classifier, without exporting a CSV. Candidates are returned for you to judge.",
+        inputSchema: { site: external_exports.string().describe("Property URL or domain"), days: external_exports.number().int().min(7).max(480).default(90) },
+        annotations: ro
+      },
+      async ({ site, days }) => run(async () => {
+        const prop = await property(site);
+        const range = dateRange(days);
+        const rows = await searchAnalytics(gscCreds, prop, { ...range, dimensions: ["query"], rowLimit: 25e3 }, f);
+        const md = classifyMarkdown(classify(rows.map((r) => ({ query: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }))));
+        return `${prop}, ${range.startDate} to ${range.endDate}
+
+${md}`;
+      })
+    );
+    register(
+      "ga4_report",
+      {
+        title: "Google Analytics 4 report",
+        description: "Read the user's own Google Analytics 4 data with their Google sign-in: sessions, engaged sessions, key events and revenue for the last N days vs the N days before, by channel, landing page, source, or AI assistant referrals (ChatGPT, Perplexity, Claude, Gemini, Copilot and more). Call without property to list the GA4 properties the account can read. Uses the Google Analytics Data API (https://developers.google.com/analytics/devguides/reporting/data/v1).",
+        inputSchema: {
+          property: external_exports.string().optional().describe("GA4 property name or ID (or the site's domain). Omit to list properties."),
+          by: external_exports.enum(["channel", "landing_page", "source", "ai_assistants"]).default("channel").describe("How to group sessions"),
+          days: external_exports.number().int().min(7).max(365).default(28).describe("Days to report (compared with the same number of days before)"),
+          limit: external_exports.number().int().min(5).max(100).default(20).describe("Rows to show")
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true }
+      },
+      async ({ property: property2, by, days, limit }) => {
+        try {
+          const creds = gscCreds;
+          const props = await listProperties(creds, f);
+          if (!property2) return { content: [{ type: "text", text: propertiesMarkdown(props) }] };
+          const p = matchGa4(props, property2);
+          if (!p) throw new Error(`${property2} isn't a GA4 property this account can read. ${props.length ? "Properties: " + props.map((x) => `${x.name} (${x.id})`).join(", ") : ""}`);
+          return { content: [{ type: "text", text: ga4Markdown(await ga4Report(creds, p, by, days, f), limit) }] };
+        } catch (e) {
+          return errorResult(e);
+        }
+      }
+    );
+    register(
+      "data_connections",
+      {
+        title: "Connect your data (setup status)",
+        description: hosted ? "Show which of the user's own data sources are connected to their AlchemyAgent account (Google Search Console and GA4 with one Google sign-in, Bing Webmaster Tools), what each one unlocks, and a fresh private link to connect or disconnect them. Use this first with a new user, whenever a Search Console, GA4 or Bing tool says it isn't connected, or when someone asks how to get data-driven recommendations." : "Show which of the user's own data sources AlchemyAgent can use (Google Search Console and GA4 with one Google sign-in, Bing Webmaster Tools, Cloudflare logs, Brave Search, PageSpeed key), why each one matters, and exactly how to connect the missing ones. Use this first with a new user, when a tool needs a key that isn't set, or when someone asks how to get better, data-driven recommendations.",
+        inputSchema: {},
+        annotations: { readOnlyHint: true, openWorldHint: false }
+      },
+      async () => run(async () => hosted ? hostedConnectionsMarkdown(await hosted.status(), await hosted.connectLink()) : connectionsMarkdown({ ...connState(opts, TOKEN_FILE), ga4: await hasScope(opts.gsc ?? {}, GA4_SCOPE).catch(() => false) }))
+    );
     register(
       "bing_webmaster",
       {
@@ -3704,13 +3076,13 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
       },
       async ({ site_url, report, limit }) => {
         try {
-          if (!opts.bingKey) throw new Error(BING_KEY_HELP);
-          const sites = await listSites2(f, opts.bingKey);
+          const key = await bingKey();
+          const sites = await listSites2(f, key);
           if (!site_url) return { content: [{ type: "text", text: sitesMarkdown(sites) }] };
           const site = matchSite(sites, site_url);
           if (!site) throw new Error(`${site_url} isn't in this Bing Webmaster Tools account. ${sites.length ? "Sites in the account: " + sites.map((s) => s.url).join(", ") : "Add and verify it at https://www.bing.com/webmasters first."}`);
           const sections = report === "overview" ? ["traffic", "queries", "crawl"] : [report];
-          const data = await bingReport(f, opts.bingKey, site.url, sections);
+          const data = await bingReport(f, key, site.url, sections);
           return { content: [{ type: "text", text: bingMarkdown(data, report === "overview" ? Math.min(limit, 10) : limit) }] };
         } catch (e) {
           return errorResult(e);
@@ -3718,25 +3090,35 @@ AlchemyAgent Pro runs today: ${v.used_today} of ${v.daily_limit}.`;
       }
     );
   }
+  if (opts.remote && !hosted) register(
+    "data_connections",
+    {
+      title: "Connect your data (setup status)",
+      description: "Explain how to connect the user's own Google Search Console, GA4 and Bing Webmaster Tools data to AlchemyAgent. This free connector has no account, so it can't hold connections; use this when someone asks about their own search traffic, queries or analytics.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false }
+    },
+    async () => run(async () => ACCOUNT_NEEDED)
+  );
   if (!opts.remote || opts.proHosted) {
     const pro = () => {
       if (!opts.licenseKey) throw new Error(MARKET_PRO_HELP);
-      return new ProApi(f, apiBase, opts.licenseKey);
+      return new ProApi(f, apiBase2, opts.licenseKey);
     };
     const saveExports = async (r, outDir) => {
       if (opts.proHosted) {
         const links = await opts.proHosted.saveExports(r.exports);
         return r.markdown + "\n\n**Spreadsheets:** " + Object.entries(links).map(([n, u]) => `[${n}](${u})`).join(" \xB7 ");
       }
-      const { mkdir: mkdir3, writeFile: writeFile3 } = await import("node:fs/promises");
+      const { mkdir: mkdir2, writeFile: writeFile2 } = await import("node:fs/promises");
       const { homedir: homedir3 } = await import("node:os");
       const { join: join3, resolve } = await import("node:path");
       const dir = resolve((outDir ?? join3(homedir3(), "Downloads", "alchemyagent-reports")).replace(/^~(?=\/)/, homedir3()));
-      await mkdir3(dir, { recursive: true });
+      await mkdir2(dir, { recursive: true });
       const paths = [];
       for (const x of r.exports) {
         const pth = join3(dir, x.name);
-        await writeFile3(pth, x.csv);
+        await writeFile2(pth, x.csv);
         paths.push(pth);
       }
       return r.markdown + "\n\n**Spreadsheets** (open in Excel or Google Sheets):\n" + paths.map((x) => `- ${x}`).join("\n");
@@ -3929,8 +3311,46 @@ The last scheduled attempt failed: ${r.last_error}` : "");
       })
     );
   }
-  registerPrompts(server2, !!opts.remote, !opts.remote || !!opts.proHosted);
+  registerPrompts(server2, !!opts.remote, !opts.remote || !!opts.proHosted, !!opts.hostedData);
   return server2;
+}
+
+// src/telemetry.ts
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
+var OFF = /* @__PURE__ */ new Set(["0", "false", "off", "no"]);
+function telemetryEnabled(env2) {
+  const dnt = (env2.DO_NOT_TRACK ?? "").trim().toLowerCase();
+  if (dnt && !OFF.has(dnt)) return false;
+  return !OFF.has((env2.ALCHEMYAGENT_TELEMETRY ?? "").trim().toLowerCase());
+}
+function installId(dir = join2(homedir2(), ".alchemyagent")) {
+  const file = join2(dir, "install-id");
+  try {
+    const id2 = readFileSync(file, "utf8").trim();
+    if (/^[0-9a-f-]{36}$/.test(id2)) return id2;
+  } catch {
+  }
+  const id = randomUUID();
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, id + "\n", { mode: 384 });
+  } catch {
+  }
+  return id;
+}
+function makeTelemetry(o) {
+  const f = o.fetchFn ?? fetch;
+  let id = o.id;
+  const client = /^[a-z_]{1,20}$/.test(o.client) ? o.client : "unknown";
+  return (tool, ok) => {
+    id ??= installId();
+    const body = JSON.stringify({ id, v: o.version, c: client, tool, ok });
+    f(`${o.apiBase}/api/telemetry`, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(3e3) }).catch(() => {
+    });
+  };
 }
 
 // src/index.ts
@@ -3938,6 +3358,9 @@ var env = (k) => {
   const v = (process.env[k] || "").trim();
   return v && !v.startsWith("${") ? v : void 0;
 };
+var apiBase = (env("ALCHEMYAGENT_API_BASE") ?? DEFAULT_API_BASE).replace(/\/$/, "");
+var telemetryEnv = { DO_NOT_TRACK: process.env.DO_NOT_TRACK, ALCHEMYAGENT_TELEMETRY: env("ALCHEMYAGENT_TELEMETRY") };
+var track = telemetryEnabled(telemetryEnv) ? makeTelemetry({ apiBase, version: VERSION, client: env("ALCHEMYAGENT_CLIENT") ?? "unknown" }) : void 0;
 var server = createServer({
   psiKey: env("ALCHEMYAGENT_PSI_KEY"),
   bingKey: env("ALCHEMYAGENT_BING_KEY"),
@@ -3947,6 +3370,7 @@ var server = createServer({
   openalexKey: env("ALCHEMYAGENT_OPENALEX_KEY"),
   licenseKey: env("ALCHEMYAGENT_LICENSE_KEY"),
   gsc: { clientId: env("ALCHEMYAGENT_GOOGLE_CLIENT_ID"), clientSecret: env("ALCHEMYAGENT_GOOGLE_CLIENT_SECRET"), serviceAccountFile: env("ALCHEMYAGENT_GOOGLE_SA_FILE") },
-  apiBase: env("ALCHEMYAGENT_API_BASE")
+  apiBase,
+  track
 });
 await server.connect(new StdioServerTransport());

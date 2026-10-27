@@ -15,7 +15,9 @@
         "ALCHEMYAGENT_GOOGLE_CLIENT_ID": "${user_config.google_client_id}",
         "ALCHEMYAGENT_GOOGLE_CLIENT_SECRET": "${user_config.google_client_secret}",
         "ALCHEMYAGENT_GOOGLE_SA_FILE": "${user_config.google_service_account_file}",
-        "ALCHEMYAGENT_LICENSE_KEY": "${user_config.alchemyagent_license_key}"
+        "ALCHEMYAGENT_LICENSE_KEY": "${user_config.alchemyagent_license_key}",
+        "ALCHEMYAGENT_TELEMETRY": "${user_config.usage_stats}",
+        "ALCHEMYAGENT_CLIENT": "claude_code"
       }
     }
   }

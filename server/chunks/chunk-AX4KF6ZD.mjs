@@ -3,6 +3,745 @@ import {
   __export
 } from "./chunk-UPBUYWNZ.mjs";
 
+// src/links.ts
+var links_exports = {};
+__export(links_exports, {
+  LINKS_UA: () => LINKS_UA,
+  bestSentence: () => bestSentence,
+  bodyText: () => bodyText,
+  buildPlan: () => buildPlan,
+  crawl: () => crawl,
+  extractLinks: () => extractLinks,
+  linksMarkdown: () => linksMarkdown,
+  norm: () => norm,
+  pagerank: () => pagerank,
+  paragraphs: () => paragraphs,
+  resolveTargets: () => resolveTargets,
+  runLinks: () => runLinks,
+  saveLinkFiles: () => saveLinkFiles,
+  sitemapUrls: () => sitemapUrls,
+  tokens: () => tokens
+});
+import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
+
+// src/bots.ts
+var BOTS = [
+  { token: "GPTBot", owner: "OpenAI", purpose: "Model training", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.1; +https://openai.com/gptbot", ipList: "https://openai.com/gptbot.json" },
+  { token: "OAI-SearchBot", owner: "OpenAI", purpose: "ChatGPT search index", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot", ipList: "https://openai.com/searchbot.json" },
+  { token: "ChatGPT-User", owner: "OpenAI", purpose: "Live fetch when a ChatGPT user asks", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot", ipList: "https://openai.com/chatgpt-user.json" },
+  { token: "ClaudeBot", owner: "Anthropic", purpose: "Model training", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)" },
+  { token: "Claude-SearchBot", owner: "Anthropic", purpose: "Claude search index" },
+  { token: "Claude-User", owner: "Anthropic", purpose: "Live fetch when a Claude user asks" },
+  { token: "PerplexityBot", owner: "Perplexity", purpose: "Perplexity search index", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)", ipList: "https://www.perplexity.com/perplexitybot.json" },
+  { token: "Perplexity-User", owner: "Perplexity", purpose: "Live fetch when a Perplexity user asks", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)", ipList: "https://www.perplexity.com/perplexity-user.json" },
+  { token: "Googlebot", owner: "Google", purpose: "Google Search, AI Overviews and AI Mode", ua: "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", ipList: "https://developers.google.com/static/search/apis/ipranges/googlebot.json" },
+  { token: "Google-Extended", owner: "Google", purpose: "robots.txt opt-out for Gemini training and grounding (no separate crawler)" },
+  { token: "Bingbot", owner: "Microsoft", purpose: "Bing Search and Copilot", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/116.0.1938.76 Safari/537.36", ipList: "https://www.bing.com/toolbox/bingbot.json" },
+  { token: "Applebot", owner: "Apple", purpose: "Siri and Spotlight search" },
+  { token: "Applebot-Extended", owner: "Apple", purpose: "robots.txt opt-out for Apple Intelligence training (no separate crawler)" },
+  { token: "CCBot", owner: "Common Crawl", purpose: "Open web dataset widely used for training" },
+  { token: "Meta-ExternalAgent", owner: "Meta", purpose: "Model training" },
+  { token: "Amazonbot", owner: "Amazon", purpose: "Alexa and Amazon AI" },
+  { token: "Bytespider", owner: "ByteDance", purpose: "Model training" },
+  { token: "DuckAssistBot", owner: "DuckDuckGo", purpose: "DuckAssist AI answers" },
+  { token: "MistralAI-User", owner: "Mistral", purpose: "Live fetch when a Le Chat user asks" }
+];
+
+// src/robots.ts
+function parseRobots(txt) {
+  const groups = [];
+  const sitemaps = [];
+  let cur = null;
+  let lastWasAgent = false;
+  for (const raw of txt.split(/\r?\n/)) {
+    const line = raw.replace(/#.*/, "").trim();
+    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    const val = m[2].trim();
+    if (key === "user-agent") {
+      if (!cur || !lastWasAgent) groups.push(cur = { agents: [], rules: [] });
+      cur.agents.push(val.toLowerCase());
+      lastWasAgent = true;
+    } else if (key === "allow" || key === "disallow") {
+      lastWasAgent = false;
+      if (cur && val) cur.rules.push({ allow: key === "allow", path: val });
+    } else if (key === "sitemap") {
+      if (val) sitemaps.push(val);
+    } else {
+      lastWasAgent = false;
+    }
+  }
+  return { groups, sitemaps };
+}
+function rulesFor(robots, token) {
+  const t = token.toLowerCase();
+  const own = robots.groups.filter((g) => g.agents.includes(t));
+  if (own.length) return { rules: own.flatMap((g) => g.rules), matched: "specific" };
+  const star = robots.groups.filter((g) => g.agents.includes("*"));
+  return { rules: star.flatMap((g) => g.rules), matched: star.length ? "wildcard" : "none" };
+}
+function toRegex(pattern) {
+  const anchored = pattern.endsWith("$");
+  const body = (anchored ? pattern.slice(0, -1) : pattern).replace(/[.+?^{}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp("^" + body + (anchored ? "$" : ""));
+}
+function isAllowed(rules, path) {
+  if (path === "/robots.txt") return { allowed: true };
+  let best;
+  for (const r of rules) {
+    if (!toRegex(r.path).test(path)) continue;
+    if (!best || r.path.length > best.path.length || r.path.length === best.path.length && r.allow && !best.allow) best = r;
+  }
+  return { allowed: best ? best.allow : true, rule: best };
+}
+
+// src/aiprefs.ts
+var UA = "AlchemyAgent-Check/0.1 (+https://alchemyagent.ai)";
+function kv(s) {
+  const out = {};
+  for (const part of s.split(/[,;]/)) {
+    const m = part.trim().match(/^([\w-]+)\s*=\s*([\w-]+)/);
+    if (m) out[m[1].toLowerCase()] = m[2].toLowerCase();
+  }
+  return out;
+}
+function parseRobotsPrefs(txt) {
+  const contentSignals = [];
+  const contentUsage = [];
+  let agents = [];
+  let lastWasAgent = false;
+  for (const raw of txt.split(/\r?\n/)) {
+    const line = raw.replace(/#.*/, "").trim();
+    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    if (key === "user-agent") {
+      agents = lastWasAgent ? [...agents, m[2]] : [m[2]];
+      lastWasAgent = true;
+      continue;
+    }
+    lastWasAgent = false;
+    const who = agents.length ? agents.join(", ") : "all";
+    if (key === "content-signal") contentSignals.push({ agents: who, signals: kv(m[2]) });
+    if (key === "content-usage") contentUsage.push({ where: `robots.txt (${who})`, value: m[2].trim() });
+  }
+  return { contentSignals, contentUsage };
+}
+async function aiPrefsCheck(origin, robotsText, page, f = fetch) {
+  const fromRobots = robotsText ? parseRobotsPrefs(robotsText) : { contentSignals: [], contentUsage: [] };
+  const h = page?.headers;
+  const html = page?.text ?? "";
+  const meta = (name) => html.match(new RegExp(`<meta\\b[^>]*name=["']${name}["'][^>]*content=["']([^"']*)["']`, "i"))?.[1];
+  const noai = [];
+  const xr = h?.get("x-robots-tag") ?? "";
+  if (/\bnoai\b|\bnoimageai\b/i.test(xr)) noai.push(`X-Robots-Tag: ${xr}`);
+  for (const m of html.matchAll(/<meta\b[^>]*name=["'](robots|[\w-]*bot)["'][^>]*content=["']([^"']*)["']/gi)) if (/\bnoai\b|\bnoimageai\b/i.test(m[2])) noai.push(`<meta name="${m[1]}" content="${m[2]}">`);
+  const cu = h?.get("content-usage");
+  const [tdmJson, aiTxt] = await Promise.all([
+    get(f, `${origin}/.well-known/tdmrep.json`, UA, 8e3),
+    get(f, `${origin}/ai.txt`, UA, 8e3)
+  ]);
+  const real = (r) => challenged(r) ? null : r.status === 200 && !/<html/i.test(r.text.slice(0, 300));
+  return {
+    contentSignals: fromRobots.contentSignals,
+    contentUsage: [...fromRobots.contentUsage, ...cu ? [{ where: "HTTP header", value: cu }] : []],
+    tdm: { header: h?.get("tdm-reservation") ?? void 0, meta: meta("tdm-reservation"), wellKnown: real(tdmJson) },
+    noai,
+    aiTxt: real(aiTxt)
+  };
+}
+var SIGNAL_MEANING = {
+  search: "building a search index and showing links/snippets",
+  "ai-input": "using content as input to AI answers (RAG, grounding, AI Overviews)",
+  "ai-train": "training or fine-tuning AI models"
+};
+function aiPrefsMarkdown(p) {
+  const L = ["### AI usage preferences (beyond allow/disallow)"];
+  const any = p.contentSignals.length || p.contentUsage.length || p.tdm.header || p.tdm.meta || p.tdm.wellKnown || p.noai.length || p.aiTxt;
+  for (const c of p.contentSignals) {
+    const parts = Object.entries(c.signals).map(([k, v]) => `${k}=${v}${SIGNAL_MEANING[k] ? ` (${SIGNAL_MEANING[k]})` : ""}`);
+    L.push(`- Content-Signal for ${c.agents}: ${parts.join("; ") || "(empty)"}`);
+    if (c.signals["ai-input"] === "no") L.push("  - ai-input=no asks AI tools not to use your pages in answers. If you want to be cited in AI search, that works against you.");
+  }
+  for (const c of p.contentUsage) L.push(`- Content-Usage (IETF AI Preferences draft) in ${c.where}: \`${c.value}\``);
+  if (p.tdm.header || p.tdm.meta) L.push(`- TDMRep reservation: ${[p.tdm.header && `header tdm-reservation: ${p.tdm.header}`, p.tdm.meta && `meta tdm-reservation=${p.tdm.meta}`].filter(Boolean).join(", ")} (text-and-data-mining rights reserved, EU DSM Article 4).`);
+  if (p.tdm.wellKnown) L.push("- /.well-known/tdmrep.json is published (W3C TDMRep policy file).");
+  if (p.noai.length) L.push(`- "noai" directives: ${p.noai.join("; ")}. Few crawlers honor these; robots.txt and Content-Signal are more widely read.`);
+  if (p.aiTxt) L.push("- /ai.txt is present (Spawning's AI-training opt-out file).");
+  if (!any) {
+    L.push("- None found. The site says nothing machine-readable about AI use beyond robots.txt.");
+    L.push("- Optional: add a Cloudflare-style line to robots.txt to state your intent, e.g. `Content-Signal: search=yes, ai-input=yes, ai-train=no` (be cited in AI answers, opt out of training). These are preferences, not access controls.");
+  }
+  return L.join("\n");
+}
+
+// src/crawler.ts
+var OUR_UA = "AlchemyAgent-Check/0.1 (+https://alchemyagent.ai)";
+var BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+async function get(f, url, ua, ms = 15e3) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await f(url, { headers: { "user-agent": ua, accept: "text/html,*/*" }, redirect: "follow", signal: ctl.signal });
+    const text2 = await r.text().catch(() => "");
+    return { status: r.status, headers: r.headers, text: text2, url: r.url || url };
+  } catch (e) {
+    return { status: 0, headers: new Headers(), text: "", url, error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    clearTimeout(t);
+  }
+}
+function challenged(res) {
+  return res.headers.get("cf-mitigated") === "challenge" || /<title>\s*Just a moment/i.test(res.text) || /captcha|access denied/i.test(res.text.slice(0, 3e3));
+}
+function metaRobots(html) {
+  const out = [];
+  for (const m of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = m[0];
+    const name = tag.match(/\bname\s*=\s*["']?([^"'\s>]+)/i)?.[1]?.toLowerCase();
+    const content = tag.match(/\bcontent\s*=\s*["']([^"']*)["']/i)?.[1];
+    if (name && content != null && (name === "robots" || BOTS.some((b) => b.token.toLowerCase() === name))) out.push({ name, content: content.toLowerCase() });
+  }
+  return out;
+}
+async function crawlerCheck(input, f = fetch, ipCounts = {}) {
+  const target = new URL(input);
+  const origin = target.origin;
+  const path = target.pathname + target.search;
+  const robotsRes = await get(f, `${origin}/robots.txt`, OUR_UA);
+  const robotsChallenged = challenged(robotsRes) || robotsRes.status === 200 && /<html/i.test(robotsRes.text.slice(0, 500));
+  const robotsNote = robotsChallenged ? "could not be read (the site's firewall answered with a challenge page instead), so per-bot rules below are unknown" : robotsRes.status === 200 ? "found" : robotsRes.status >= 500 ? `returned ${robotsRes.status}; Google treats a 5xx robots.txt as "block everything" until it recovers` : robotsRes.status === 0 ? `could not be fetched (${robotsRes.error})` : `returned ${robotsRes.status}, so crawlers treat the whole site as allowed`;
+  const robots = parseRobots(robotsRes.status === 200 && !robotsChallenged ? robotsRes.text : "");
+  const serverBlocksAll = robotsRes.status >= 500;
+  const page = await get(f, target.toString(), BROWSER_UA);
+  const baselineBlocked = page.status !== 200 || challenged(page);
+  const xRobots = baselineBlocked ? "" : page.headers.get("x-robots-tag") ?? "";
+  const metas = baselineBlocked ? [] : metaRobots(page.text);
+  const rows = BOTS.map((b) => {
+    const { rules, matched } = rulesFor(robots, b.token);
+    const verdict = isAllowed(rules, path);
+    return {
+      token: b.token,
+      owner: b.owner,
+      purpose: b.purpose,
+      robots: robotsChallenged ? "unknown" : serverBlocksAll || !verdict.allowed ? "blocked" : "allowed",
+      robotsRule: verdict.rule ? `${verdict.rule.allow ? "Allow" : "Disallow"}: ${verdict.rule.path}` : void 0,
+      matched,
+      ipList: b.ipList ? ipCounts[b.token] ? `${ipCounts[b.token]} ranges` : "published" : void 0
+    };
+  });
+  const probeBots = baselineBlocked ? [] : BOTS.filter((b) => !!b.ua);
+  for (let i = 0; i < probeBots.length; i += 3) {
+    await Promise.all(probeBots.slice(i, i + 3).map(async (b) => {
+      const r = await get(f, target.toString(), b.ua);
+      const row = rows.find((x) => x.token === b.token);
+      row.probe = r.status === 0 ? "no response" : challenged(r) ? `${r.status} challenge` : r.status === page.status ? `${r.status} same as browser` : `${r.status} (browser got ${page.status})`;
+    }));
+  }
+  const sitemapUrls2 = robots.sitemaps.length ? robots.sitemaps.slice(0, 5) : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
+  const sitemaps = await Promise.all(sitemapUrls2.map(async (u) => {
+    const r = await get(f, u, OUR_UA);
+    return { url: u, status: r.status, challenged: challenged(r), listed: robots.sitemaps.includes(u) };
+  }));
+  const llms = await get(f, `${origin}/llms.txt`, OUR_UA);
+  const llmsTxt = challenged(llms) ? "unknown" : llms.status === 200 && !/<html/i.test(llms.text.slice(0, 500)) ? "present" : "missing";
+  const aiPrefs = await aiPrefsCheck(origin, robotsRes.status === 200 && !robotsChallenged ? robotsRes.text : null, baselineBlocked ? null : page, f);
+  return { aiPrefs, origin, path, robotsStatus: robotsRes.status, robotsNote, pageStatus: page.status, baselineBlocked, pageChallenged: challenged(page), xRobots, metas, rows, sitemaps, llmsTxt };
+}
+function crawlerMarkdown(r, from = "your machine") {
+  const blocked = r.rows.filter((x) => x.robots === "blocked");
+  const probeIssues = r.rows.filter((x) => x.probe && !/same as browser/.test(x.probe));
+  const pageDirectives = [r.xRobots && `X-Robots-Tag: ${r.xRobots}`, ...r.metas.map((m) => `<meta name="${m.name}" content="${m.content}">`)].filter(Boolean);
+  const noindex = pageDirectives.some((d) => /noindex|none/.test(d));
+  const out = [
+    `## AI crawler access: ${r.origin}${r.path}`,
+    `robots.txt ${r.robotsNote}. ${r.baselineBlocked ? `The page answered our plain check with ${r.pageStatus}${r.pageChallenged ? " and a firewall challenge" : ""}.` : `Page returned ${r.pageStatus}.`}`,
+    "",
+    "| Crawler | Owner | What it does | robots.txt | UA probe | IP list |",
+    "|---|---|---|---|---|---|",
+    ...r.rows.map((x) => `| ${x.token} | ${x.owner} | ${x.purpose} | ${x.robots === "blocked" ? `**blocked**${x.robotsRule ? ` (${x.robotsRule})` : ""}` : x.robots} | ${x.probe ?? (r.baselineBlocked ? "inconclusive" : "n/a")} | ${x.ipList ?? "none published"} |`),
+    "",
+    "### What stands out"
+  ];
+  if (r.rows.every((x) => x.robots === "unknown")) out.push("- We couldn't read robots.txt, so per-bot rules are unknown.");
+  else if (!blocked.length) out.push("- robots.txt lets every listed crawler reach this page.");
+  else out.push(`- robots.txt blocks ${blocked.map((b) => b.token).join(", ")} from this page. Blocking training bots (GPTBot, ClaudeBot, CCBot, Google-Extended) is a business choice. Blocking search or user-fetch bots (OAI-SearchBot, ChatGPT-User, PerplexityBot, Claude-SearchBot) keeps the page out of those AI answers.`);
+  if (r.baselineBlocked) out.push(`- The site's firewall or CDN ${r.pageChallenged ? "challenged" : `refused (${r.pageStatus})`} our automated check, so page-level directives and the bot user-agent probe are inconclusive. This is common on sites with bot protection, and verified crawlers coming from their real IPs usually still get through. Confirm in your CDN's bot or firewall logs, or allow AI bots by their published IP ranges.`);
+  else if (noindex) out.push(`- The page itself says not to index it: ${pageDirectives.join("; ")}.`);
+  else if (pageDirectives.length) out.push(`- Page-level directives: ${pageDirectives.join("; ")}.`);
+  const googleToo = probeIssues.some((p) => /^Googlebot$/i.test(p.token)) && probeIssues.length >= 3;
+  if (googleToo) out.push(`- Likely a false alarm: our Googlebot-named probe was challenged too, and sites that block the real Googlebot drop out of Google. This pattern means the CDN blocks impostors (requests that use a bot's name from the wrong IPs) while letting verified crawlers through. Treat the probe result below as low priority unless the CDN's logs show verified AI crawlers being challenged.`);
+  if (probeIssues.length) out.push(`- Requests using these bots' user-agents were treated differently from a browser: ${probeIssues.map((p) => `${p.token} (${p.probe})`).join(", ")}. A CDN or firewall rule may be blocking them. This probe comes from ${from}, not the bots' real IPs, so some firewalls block it as an impostor while still letting the verified bot in; confirm in your CDN's bot or firewall logs.`);
+  else if (!r.baselineBlocked) out.push(`- No firewall or CDN difference showed up for the bot user-agents we probed (from ${from}; verified-IP rules can't be seen this way).`);
+  const okMaps = r.sitemaps.filter((s) => s.status === 200 && !s.challenged);
+  const blockedMaps = r.sitemaps.filter((s) => s.challenged || s.status === 403);
+  out.push(!okMaps.length && blockedMaps.length ? `- Sitemap: the firewall blocked our check of ${blockedMaps.map((s) => s.url).join(", ")}, so we couldn't confirm it.` : okMaps.length ? `- Sitemap: ${okMaps.map((s) => s.url).join(", ")}${okMaps.some((s) => s.listed) ? " (listed in robots.txt)" : " (not listed in robots.txt; add a Sitemap: line)"}.` : "- No working sitemap found in robots.txt or at /sitemap.xml.");
+  out.push(r.llmsTxt === "unknown" ? "- llms.txt: blocked by the firewall, couldn't check." : r.llmsTxt === "present" ? "- llms.txt is present." : "- No llms.txt. It's optional, but some AI tools read it as a guide to your key pages.");
+  out.push("- Operators with an IP list can be allowlisted by IP in your firewall, which is safer than allowing by user-agent alone.");
+  out.push("", aiPrefsMarkdown(r.aiPrefs));
+  out.push("", "AlchemyAgent Pro rechecks this weekly and reads your CDN logs to confirm which AI bots actually reach you: https://alchemyagent.ai");
+  return out.join("\n");
+}
+
+// src/links.ts
+var LINKS_UA = "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)";
+var STOP = new Set("a an and are as at be by can do for from how i in is it of on or our the to vs what when where which who why with you your best top near me 2024 2025 2026".split(" "));
+var GENERIC_TOPIC = new Set("seo services service agency agencies company companies marketing digital google online business strategy strategies guide tips tools free cost".split(" "));
+var GENERIC = /^(read more|read story|read the story|learn more|click here|here|more|this|link|this page|see more|find out more|continue reading|details|view|view more)$/i;
+var UTILITY = /^\/(call|contact[^/]*|book[^/]*|privacy[^/]*|terms[^/]*|legal|disclaimer|[^/]*polic(y|ies)|site-?map|entitymap\.html|thank[^/]*|search[^/]*|cart|account|login|blog|newsletters?)\/?$|\.html$/i;
+var OPERATOR = /[":]|^site |^inurl|^intitle/;
+var SKIP_PATH = /(^\/wp-|\/feed\/?$|\/tag\/|\/author\/|\/page\/\d+|\.(pdf|jpe?g|png|webp|gif|svg|zip|xml|css|js)$|\/cdn-cgi\/)/i;
+var ZONE_TAGS = ["nav", "header", "footer", "aside"];
+var decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;|&rsquo;|&lsquo;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&ndash;|&mdash;/g, "-").replace(/&#(\d+);/g, (_, n5) => String.fromCharCode(Number(n5))).replace(/&#x([0-9a-f]+);/gi, (_, n5) => String.fromCharCode(parseInt(n5, 16)));
+var text = (fragment) => decode(fragment.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+function norm(u) {
+  try {
+    const p = new URL(u);
+    return `${p.protocol}//${p.host.toLowerCase().replace(/^www\./, "")}${p.pathname.replace(/\/+$/, "") || "/"}`;
+  } catch {
+    return u;
+  }
+}
+function tokens(s) {
+  return new Set((s.toLowerCase().match(/[a-z0-9][a-z0-9+.-]*/g) ?? []).filter((w) => !STOP.has(w) && w.length > 2));
+}
+var minus = (a, b) => new Set([...a].filter((w) => !b.has(w)));
+function zones(html) {
+  const spans = [];
+  for (const tag of ZONE_TAGS)
+    for (const m of html.matchAll(new RegExp(`<${tag}\\b[\\s\\S]*?</${tag}>`, "gi")))
+      spans.push([m.index, m.index + m[0].length, tag === "footer" ? "footer" : tag === "aside" ? "other" : "nav"]);
+  return spans;
+}
+function extractLinks(pageUrl, html, host2) {
+  const clean = html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1>/gi, (m) => " ".repeat(m.length));
+  const zs = zones(clean);
+  const out = [];
+  for (const m of clean.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const hm = m[1].match(/\bhref\s*=\s*["']([^"']+)["']/i);
+    if (!hm) continue;
+    const href = decode(hm[1]).trim();
+    if (/^(#|mailto:|tel:|javascript:)/i.test(href)) continue;
+    let abs;
+    try {
+      abs = new URL(href, pageUrl);
+    } catch {
+      continue;
+    }
+    abs.hash = "";
+    if (!/^https?:$/.test(abs.protocol) || abs.hostname.toLowerCase().replace(/^www\./, "") !== host2 || SKIP_PATH.test(abs.pathname)) continue;
+    let zone = "body";
+    for (const [a, b, z] of zs) {
+      if (a <= m.index && m.index < b) {
+        zone = z;
+        if (z === "nav" || z === "footer") break;
+      }
+    }
+    const anchor = text(m[2]) || m[1].match(/\baria-label\s*=\s*["']([^"']+)/i)?.[1] || m[2].match(/alt\s*=\s*["']([^"']+)/i)?.[1] || "";
+    out.push({ to: norm(abs.href.split("?")[0]), raw: abs.href, anchor: anchor.slice(0, 120), zone, nofollow: /\brel\s*=\s*["'][^"']*nofollow/i.test(m[1]) });
+  }
+  return out;
+}
+var NON_BODY = /<!--[\s\S]*?-->|<(script|style|noscript|template|nav|header|footer|aside|form)\b[\s\S]*?<\/\1>/gi;
+function bodyText(html) {
+  const x = html.replace(NON_BODY, " ");
+  const m = x.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i);
+  return text(m ? m[2] : x);
+}
+function paragraphs(html) {
+  const x = html.replace(NON_BODY, " ");
+  const out = [];
+  for (const m of x.matchAll(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const t = text(m[2]);
+    if (t.length >= 60 && t.length <= 700 && !/^(by [a-z]+ [a-z]+ ·|published|updated|table of contents)/i.test(t)) out.push(t);
+    if (out.length >= 400) break;
+  }
+  return out;
+}
+async function pool(items, n5, fn, onDone) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n5, items.length) }, async () => {
+    while (i < items.length) {
+      const k = i++;
+      out[k] = await fn(items[k]);
+      onDone?.();
+    }
+  }));
+  return out;
+}
+async function sitemapUrls(base, f, limit) {
+  const origin = new URL(base).origin;
+  const host2 = new URL(base).hostname.replace(/^www\./, "");
+  const robots = await get(f, `${origin}/robots.txt`, LINKS_UA, 1e4);
+  const listed = robots.status === 200 ? parseRobots(robots.text).sitemaps : [];
+  const todo = listed.length ? [...listed] : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
+  const seenMaps = /* @__PURE__ */ new Set(), seen = /* @__PURE__ */ new Set(), urls = [];
+  while (todo.length && urls.length < limit && seenMaps.size < 60) {
+    const sm = todo.shift();
+    if (seenMaps.has(sm)) continue;
+    seenMaps.add(sm);
+    const r = await get(f, sm, LINKS_UA, 2e4);
+    if (r.status !== 200) continue;
+    const locs = [...r.text.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/gi)].map((m) => decode(m[1]));
+    if (/<sitemapindex/i.test(r.text)) {
+      todo.push(...locs.filter((u) => !/(image|video|news|agentic)/i.test(u)));
+      continue;
+    }
+    for (const u of locs) {
+      let h = "";
+      try {
+        h = new URL(u).hostname.replace(/^www\./, "");
+      } catch {
+        continue;
+      }
+      if (h !== host2 || seen.has(u) || /\.(jpe?g|png|webp|gif|pdf|xml)(\?|$)/i.test(u)) continue;
+      seen.add(u);
+      urls.push(u);
+      if (urls.length >= limit) break;
+    }
+  }
+  return urls;
+}
+var isChallenge = (status, headers, body) => headers.get("cf-mitigated") === "challenge" || (status === 403 || status === 503) && /Just a moment|cf-chl|captcha|challenge-platform/i.test(body.slice(0, 5e3));
+async function crawl(urls, f, host2, onDone) {
+  const out = {};
+  const rows = await pool(urls, 6, async (u) => {
+    const r = await get(f, u, LINKS_UA, 2e4);
+    if (r.status === 0) return [u, { status: 0 }];
+    if (isChallenge(r.status, r.headers, r.text)) return [u, { status: r.status, challenged: true }];
+    if (r.status !== 200 || !/html/i.test(r.headers.get("content-type") ?? "")) return [u, { status: r.status }];
+    const t = r.text;
+    return [u, {
+      status: 200,
+      final: norm(r.url),
+      title: text(t.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").slice(0, 160),
+      h1: text(t.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "").slice(0, 160),
+      noindex: /<meta[^>]+name=["']robots["'][^>]+noindex/i.test(t),
+      links: extractLinks(r.url, t, host2),
+      text: bodyText(t).slice(0, 4e4),
+      paras: paragraphs(t)
+    }];
+  }, onDone);
+  for (const [u, p] of rows) out[norm(u)] = p;
+  return out;
+}
+async function resolveTargets(targets, f, onDone) {
+  const out = {};
+  const rows = await pool(Object.entries(targets), 6, async ([u, raw]) => {
+    let cur = raw.split("?")[0], hops = 0;
+    while (hops < 6) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 15e3);
+      try {
+        const r = await f(cur, { headers: { "user-agent": LINKS_UA, accept: "text/html,*/*" }, redirect: "manual", signal: ctl.signal });
+        await r.body?.cancel().catch(() => {
+        });
+        const loc = r.headers.get("location");
+        if ([301, 302, 307, 308].includes(r.status) && loc) {
+          cur = new URL(loc, cur).href;
+          hops++;
+          continue;
+        }
+        return [u, { status: r.status, final: norm(cur), hops }];
+      } catch {
+        return [u, { status: 0 }];
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return [u, { status: 310, final: norm(cur), hops }];
+  }, onDone);
+  for (const [u, r] of rows) out[u] = r;
+  return out;
+}
+function pagerank(nodes, edges, d = 0.85, iters = 60) {
+  const n5 = nodes.length;
+  if (!n5) return {};
+  const idx = new Map(nodes.map((u, i) => [u, i]));
+  const outs = nodes.map(() => []);
+  const list = edges instanceof Set ? [...edges].map((e) => e.split("	")) : edges;
+  for (const [a, b] of list) if (idx.has(a) && idx.has(b) && a !== b) outs[idx.get(a)].push(idx.get(b));
+  let pr = new Array(n5).fill(1 / n5);
+  for (let it = 0; it < iters; it++) {
+    const nxt = new Array(n5).fill((1 - d) / n5);
+    let dangling = 0;
+    for (let i = 0; i < n5; i++) if (!outs[i].length) dangling += pr[i];
+    for (let i = 0; i < n5; i++) if (outs[i].length) {
+      const share = d * pr[i] / outs[i].length;
+      for (const j of outs[i]) nxt[j] += share;
+    }
+    for (let j = 0; j < n5; j++) nxt[j] += d * dangling / n5;
+    pr = nxt;
+  }
+  const top = Math.max(...pr) || 1;
+  return Object.fromEntries(nodes.map((u, i) => [u, Math.round(pr[i] / top * 1e4) / 100]));
+}
+function bestSentence(paras, anchor) {
+  const all = tokens(anchor);
+  const want = minus(all, GENERIC_TOPIC).size ? minus(all, GENERIC_TOPIC) : all;
+  let best = "", score = 0;
+  for (const para of paras)
+    for (const s of para.split(/(?<=[.!?])\s+/)) {
+      if (s.length < 40 || s.length > 400) continue;
+      const st = tokens(s);
+      const hit = [...want].filter((w) => st.has(w)).length;
+      if (hit > score) {
+        best = s;
+        score = hit;
+      }
+    }
+  return score >= Math.min(2, want.size) ? best.slice(0, 260) : "";
+}
+var esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function buildPlan(pages, resolved, gsc2, base, o) {
+  const brands = o.brand.map((b) => b.trim().toLowerCase()).filter(Boolean);
+  const brandRe = brands.length ? new RegExp(brands.map(esc).join("|"), "i") : null;
+  const isTopicQ = (q) => !OPERATOR.test(q) && !(brandRe && brandRe.test(q));
+  const pathOf = (u) => {
+    try {
+      return new URL(u).pathname || "/";
+    } catch {
+      return "/";
+    }
+  };
+  const utility = (u) => UTILITY.test(pathOf(u));
+  const ok = {};
+  for (const [u, p] of Object.entries(pages)) if (p.status === 200 && !p.noindex) ok[u] = { title: p.title ?? "", h1: p.h1 ?? "", links: p.links ?? [], text: p.text ?? "", paras: p.paras ?? [] };
+  const nodes = Object.keys(ok).sort();
+  const status = {};
+  for (const u of nodes) status[u] = { status: 200, final: u };
+  for (const [u, r] of Object.entries(resolved)) if (!status[u]) status[u] = r;
+  for (const [u, p] of Object.entries(pages)) if (!status[u] && p.status >= 400) status[u] = { status: p.status, final: u };
+  const freq = /* @__PURE__ */ new Map();
+  for (const p of Object.values(ok)) for (const k of new Set(p.links.map((l) => `${l.to}	${l.anchor.toLowerCase()}`))) freq.set(k, (freq.get(k) ?? 0) + 1);
+  if (nodes.length >= 10) {
+    for (const p of Object.values(ok)) for (const l of p.links) if (l.zone === "body" && (freq.get(`${l.to}	${l.anchor.toLowerCase()}`) ?? 0) >= 0.4 * nodes.length) l.zone = "template";
+  }
+  const edges = /* @__PURE__ */ new Set(), bodyEdges = /* @__PURE__ */ new Set();
+  const anyIn = /* @__PURE__ */ new Map(), anchorsTo = /* @__PURE__ */ new Map();
+  const redirects = [], broken = [], generic = [];
+  for (const src of nodes) {
+    for (const l of ok[src].links) {
+      const st = status[l.to] ?? { status: 0 };
+      const dst = st.final ?? l.to;
+      if (dst !== l.to && ([301, 302, 307, 308].includes(st.status) || st.status === 200 && st.hops)) redirects.push({ page: src, href: l.raw, final: dst, anchor: l.anchor, zone: l.zone });
+      else if (st.status >= 400) {
+        broken.push({ page: src, href: l.raw, status: st.status, anchor: l.anchor, zone: l.zone });
+        continue;
+      }
+      if (dst === src) continue;
+      edges.add(`${src}	${dst}`);
+      anyIn.set(dst, (anyIn.get(dst) ?? 0) + 1);
+      if (l.zone === "body") {
+        bodyEdges.add(`${src}	${dst}`);
+        const a = l.anchor.trim();
+        if (a && GENERIC.test(a)) generic.push({ page: src, to: dst, anchor: a });
+        if (a.length >= 4 && !GENERIC.test(a)) {
+          const k = a.toLowerCase();
+          if (!anchorsTo.has(k)) anchorsTo.set(k, /* @__PURE__ */ new Set());
+          anchorsTo.get(k).add(dst);
+        }
+      }
+    }
+  }
+  const pr = pagerank(nodes, edges);
+  const gp = gsc2.pages;
+  const qByPage = /* @__PURE__ */ new Map();
+  for (const [page, q, c, i, pos] of gsc2.pq) if (isTopicQ(q)) {
+    if (!qByPage.has(page)) qByPage.set(page, []);
+    qByPage.get(page).push([q, c, i, pos]);
+  }
+  const prof = /* @__PURE__ */ new Map();
+  for (const u of nodes) {
+    const t = /* @__PURE__ */ new Map();
+    for (const [q, , i] of [...qByPage.get(u) ?? []].sort((a, b) => b[2] - a[2]).slice(0, 40))
+      for (const w of minus(tokens(q), GENERIC_TOPIC)) t.set(w, (t.get(w) ?? 0) + Math.log10(i + 10));
+    for (const w of minus(tokens(`${ok[u].title} ${ok[u].h1}`), GENERIC_TOPIC)) t.set(w, (t.get(w) ?? 0) + 1);
+    prof.set(u, t);
+  }
+  const total = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+  const sim = (a, b) => {
+    const ta = prof.get(a), tb = prof.get(b);
+    if (!ta.size || !tb.size) return 0;
+    let inter = 0;
+    for (const [w, v] of ta) if (tb.has(w)) inter += Math.min(v, tb.get(w));
+    return inter / (Math.min(total(ta), total(tb)) || 1);
+  };
+  const topicImpr = new Map(nodes.map((u) => [u, (qByPage.get(u) ?? []).reduce((a, r) => a + r[2], 0)]));
+  const topicRank = new Map(nodes.map((u) => [u, (qByPage.get(u) ?? []).filter((r) => r[3] && r[3] <= 10)]));
+  const ranksWell = (u) => !utility(u) && ok[u].text.split(/\s+/).length >= 250 && topicRank.get(u).reduce((a, r) => a + r[2], 0) >= 20;
+  const cands = nodes.filter((u) => gp[u] && !utility(u) && gp[u].position >= o.posMin && gp[u].position <= o.posMax && topicImpr.get(u) >= o.minImpressions);
+  cands.sort((a, b) => topicImpr.get(b) - topicImpr.get(a));
+  const usedAnchor = new Map([...anchorsTo].map(([a, v]) => [a, new Set(v)]));
+  const proposals = [];
+  for (const c of cands) {
+    const pageWords = tokens(`${ok[c].title} ${ok[c].h1} ${ok[c].text.slice(0, 2e4)}`);
+    const qs = [...qByPage.get(c) ?? []].sort((a, b) => b[2] - a[2]).map((r) => r[0]).filter((q) => q.length >= 4 && q.length <= 60 && q.split(/\s+/).length <= 6 && [...tokens(q)].every((w) => pageWords.has(w))).slice(0, 8);
+    const donors = [];
+    for (const d of nodes) {
+      if (d === c || bodyEdges.has(`${d}	${c}`) || !ranksWell(d)) continue;
+      const s = sim(c, d);
+      if (s < 0.12) continue;
+      donors.push([s * (1 + Math.log10((gp[d]?.impressions ?? 0) + 10)) * (1 + pr[d] / 50), s, d]);
+    }
+    donors.sort((a, b) => b[0] - a[0]);
+    let k = 0, taken = 0;
+    for (const [, s, d] of donors.slice(0, 12)) {
+      if (taken >= o.donorsPer) break;
+      const order = [...qs.slice(k), ...qs.slice(0, k)];
+      const anchor = order.find((q) => ![...usedAnchor.get(q.toLowerCase()) ?? []].some((x) => x !== c)) ?? (ok[c].h1 || ok[c].title).split(" | ")[0];
+      const sent = bestSentence(ok[d].paras.length ? ok[d].paras : [ok[d].text], anchor);
+      if (!sent) continue;
+      k++;
+      taken++;
+      if (!usedAnchor.has(anchor.toLowerCase())) usedAnchor.set(anchor.toLowerCase(), /* @__PURE__ */ new Set());
+      usedAnchor.get(anchor.toLowerCase()).add(c);
+      proposals.push({
+        target: c,
+        target_title: ok[c].title,
+        target_position: gp[c].position,
+        target_impressions: topicImpr.get(c),
+        target_clicks: gp[c].clicks,
+        donor: d,
+        donor_title: ok[d].title,
+        donor_position: gp[d]?.position ?? 0,
+        similarity: Math.round(s * 100) / 100,
+        donor_authority: pr[d],
+        anchor,
+        place_near: sent,
+        target_authority_before: 0,
+        target_authority_after: 0
+      });
+    }
+  }
+  const after = pagerank(nodes, /* @__PURE__ */ new Set([...edges, ...proposals.map((p) => `${p.donor}	${p.target}`)]));
+  for (const p of proposals) {
+    p.target_authority_before = pr[p.target];
+    p.target_authority_after = after[p.target];
+  }
+  const home = norm(base);
+  const orphans = nodes.filter((u) => !anyIn.get(u) && u !== home);
+  const tmpl = {};
+  for (const l of ok[home]?.links ?? []) tmpl[l.zone] = (tmpl[l.zone] ?? 0) + 1;
+  return {
+    pages: nodes.length,
+    edges: edges.size,
+    body_edges: bodyEdges.size,
+    candidates: cands.length,
+    proposals,
+    redirect_links: redirects,
+    broken_links: broken,
+    generic_anchors: generic,
+    mixed_anchors: [...anchorsTo].filter(([, v]) => v.size > 1).map(([anchor, v]) => ({ anchor, targets: [...v].sort() })),
+    orphans,
+    prune_or_link: orphans.filter((u) => (gp[u]?.impressions ?? 0) < 10),
+    leave_alone: nodes.filter((u) => gp[u] && gp[u].position && gp[u].position <= 5 && gp[u].clicks >= 10),
+    homepage_links: tmpl,
+    authority: Object.fromEntries(Object.entries(pr).sort((a, b) => b[1] - a[1]).slice(0, 30)),
+    unlinked_candidates: cands.filter((c) => !proposals.some((p) => p.target === c))
+  };
+}
+async function runLinks(o) {
+  const host2 = new URL(o.base).hostname.toLowerCase().replace(/^www\./, "");
+  const prog = o.progress ?? { phase: "", done: 0, total: 0 };
+  Object.assign(prog, { phase: "reading sitemaps", done: 0, total: 0 });
+  const urls = await sitemapUrls(o.base, o.f, o.maxPages);
+  if (!urls.length) throw new Error(`No sitemap URLs found for ${o.base} (checked robots.txt Sitemap lines and /sitemap.xml). The crawl starts from the sitemap, so publish one first.`);
+  Object.assign(prog, { phase: "crawling pages", done: 0, total: urls.length });
+  const pages = await crawl(urls, o.f, host2, () => prog.done++);
+  const blocked = Object.values(pages).filter((p) => p.challenged).length;
+  const known = new Set(Object.keys(pages));
+  const targets = {};
+  for (const p of Object.values(pages)) for (const l of p.status === 200 ? p.links ?? [] : []) if (!known.has(l.to) && !targets[l.to] && Object.keys(targets).length < 1500) targets[l.to] = l.raw;
+  Object.assign(prog, { phase: "checking link targets", done: 0, total: Object.keys(targets).length });
+  const resolved = await resolveTargets(targets, o.f, () => prog.done++);
+  Object.assign(prog, { phase: "building the plan", done: 0, total: 0 });
+  const plan = buildPlan(pages, resolved, o.gsc ?? { pages: {}, pq: [] }, o.base, o.plan);
+  return { site: norm(o.base), date: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), range: [o.plan.posMin, o.plan.posMax], gscProperty: o.gsc ? o.gscProperty : void 0, crawled: Object.keys(pages).length, blocked, sitemapUrls: urls.length, plan };
+}
+var csvCell = (v) => {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+var csv = (rows) => rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+async function saveLinkFiles(r, md, outDir) {
+  const host2 = new URL(r.site).hostname;
+  const dir = resolvePath((outDir ?? join(homedir(), "Downloads", "alchemyagent-reports")).replace(/^~(?=\/)/, homedir()));
+  await mkdir(dir, { recursive: true });
+  const stem = join(dir, `internal-links-${host2}-${r.date}`);
+  const p = r.plan;
+  const fields = ["target", "target_position", "target_impressions", "target_clicks", "donor", "donor_position", "similarity", "donor_authority", "anchor", "place_near", "target_authority_before", "target_authority_after"];
+  const cleanup = [["type", "page", "href_or_to", "detail", "anchor", "zone"]];
+  for (const x of p.redirect_links) cleanup.push(["redirect (rewrite to final URL)", x.page, x.href, x.final, x.anchor, x.zone]);
+  for (const x of p.broken_links) cleanup.push(["broken", x.page, x.href, x.status, x.anchor, x.zone]);
+  for (const x of p.generic_anchors) cleanup.push(["generic anchor", x.page, x.to, "", x.anchor, "body"]);
+  for (const x of p.mixed_anchors) cleanup.push(["same anchor, different URLs", "", x.targets.join(" | "), "", x.anchor, "body"]);
+  for (const u of p.orphans) cleanup.push([`orphan${p.prune_or_link.includes(u) ? " (prune or link)" : ""}`, u, "", "", "", ""]);
+  const files = [`${stem}.csv`, `${stem}.cleanup.csv`, `${stem}.json`, `${stem}.md`];
+  await writeFile(files[0], csv([fields, ...p.proposals.map((x) => fields.map((k) => x[k]))]));
+  await writeFile(files[1], csv(cleanup));
+  await writeFile(files[2], JSON.stringify(r, null, 1));
+  await writeFile(files[3], md + "\n");
+  return files;
+}
+var fmt = (n5) => Math.round(n5).toLocaleString("en-US");
+var cell = (s) => s.replace(/\|/g, "/").replace(/\n/g, " ");
+function linksMarkdown(r, show = 25) {
+  const p = r.plan;
+  const short2 = (u) => u.replace(r.site.replace(/\/$/, ""), "") || "/";
+  const L = [
+    `# Internal link rewiring: ${new URL(r.site).hostname}`,
+    "",
+    `Plan only, nothing on the site changed. ${r.date}: ${p.pages} indexable pages from ${r.sitemapUrls} sitemap URLs, ${fmt(p.edges)} internal links (${fmt(p.body_edges)} in body copy).${r.blocked ? ` ${r.blocked} pages were blocked by a firewall challenge and skipped.` : ""}`
+  ];
+  if (!r.gscProperty) L.push("", "**Search Console isn't connected**, so there are no impression-based link targets in this run: cleanup only. Connect Google (gsc_connect) and run it again for the full plan.");
+  else L.push(`Search Console: ${r.gscProperty}. Impressions below are non-brand.`);
+  L.push("");
+  const targets = /* @__PURE__ */ new Map();
+  for (const x of p.proposals) {
+    if (!targets.has(x.target)) targets.set(x.target, []);
+    targets.get(x.target).push(x);
+  }
+  if (r.gscProperty) {
+    L.push(
+      p.proposals.length ? `## ${targets.size} page${targets.size === 1 ? "" : "s"} stuck at positions ${r.range[0]}-${r.range[1]} get ${p.proposals.length} new body link${p.proposals.length === 1 ? "" : "s"}` : `## No new body links this run`,
+      "Each link comes from a page that already ranks on page one for the same topic. Anchors are the target's own queries. Add each link inside the donor's body copy, in or next to the quoted sentence.",
+      ""
+    );
+    if (p.proposals.length) {
+      L.push("| Target page | Position | Impressions | Link from | Anchor | Place near | Authority before \u2192 after |", "|---|---:|---:|---|---|---|---|");
+      for (const x of p.proposals.slice(0, show))
+        L.push(`| ${short2(x.target)} | ${x.target_position} | ${fmt(x.target_impressions)} | ${short2(x.donor)} (pos ${x.donor_position}) | ${cell(x.anchor)} | \u201C${cell(x.place_near.slice(0, 140))}${x.place_near.length > 140 ? "\u2026" : ""}\u201D | ${x.target_authority_before} \u2192 ${x.target_authority_after} |`);
+      if (p.proposals.length > show) L.push("", `\u2026and ${p.proposals.length - show} more in the CSV.`);
+    } else L.push(p.candidates ? `Pages are sitting at ${r.range[0]}-${r.range[1]}, but no page that already ranks on the same topic has a natural spot for a link. Those pages need content work first.` : `No pages with real impressions are sitting at positions ${r.range[0]}-${r.range[1]} right now.`);
+    if (p.unlinked_candidates.length) L.push("", `${p.unlinked_candidates.length}${p.proposals.length ? " more" : ""} page${p.unlinked_candidates.length === 1 ? "" : "s"} at ${r.range[0]}-${r.range[1]} had no good donor: ${p.unlinked_candidates.slice(0, 8).map(short2).join(", ")}.`);
+    L.push("");
+  }
+  L.push(
+    "## Cleanup",
+    `- **${p.redirect_links.length} links point at redirects.** Rewrite each to its final URL at the source.`,
+    `- **${p.broken_links.length} links point at errors** (4xx/5xx).`,
+    `- **${p.generic_anchors.length} body links use generic anchors** ("read more", "click here"). Replace them with words that describe the target.`,
+    `- **${p.mixed_anchors.length} anchors point at more than one URL**, which blurs which page owns the topic.`,
+    `- **${p.orphans.length} sitemap pages have no internal links**${p.prune_or_link.length ? ` (${p.prune_or_link.length} with no search demand either: link them or prune them)` : ""}.`
+  );
+  const ex = [...p.broken_links.slice(0, 5).map((x) => `- Broken: ${short2(x.page)} \u2192 ${x.href} (${x.status})`), ...p.redirect_links.slice(0, 5).map((x) => `- Redirect: ${short2(x.page)} \u2192 ${x.href} \u2192 ${short2(x.final)}`), ...p.orphans.slice(0, 5).map((u) => `- Orphan: ${short2(u)}`)];
+  if (ex.length) L.push("", "Examples:", ...ex);
+  if (Object.keys(p.homepage_links).length) L.push("", `Homepage links by zone: ${Object.entries(p.homepage_links).sort().map(([k, v]) => `${k} ${v}`).join(", ")}.`);
+  if (p.leave_alone.length) L.push("", `Leave alone: ${p.leave_alone.length} pages already rank in the top 5 with clicks. Don't rewire their links.`);
+  L.push(
+    "",
+    "Authority is internal PageRank on a 0 to 100 scale (100 = the strongest page). It estimates how link equity flows; Google's own signals aren't public.",
+    `Baseline for measuring: ${r.date}. Re-check the target pages with gsc_performance (page filter) about 4 and 8 weeks after the links go live.`
+  );
+  if (r.files?.length) L.push("", "Files:", ...r.files.map((x) => `- ${x}`));
+  return L.join("\n");
+}
+
 // src/gsc.ts
 var gsc_exports = {};
 __export(gsc_exports, {
@@ -21,15 +760,15 @@ __export(gsc_exports, {
 });
 import { createServer } from "node:http";
 import { createHash, createSign, randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { mkdir as mkdir2, readFile, writeFile as writeFile2, chmod } from "node:fs/promises";
+import { homedir as homedir2, platform } from "node:os";
+import { join as join2 } from "node:path";
 import { spawn } from "node:child_process";
 var SCOPE = "https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/analytics.readonly";
 var GA4_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
 var TOKEN_URL = "https://oauth2.googleapis.com/token";
 var API = "https://searchconsole.googleapis.com/webmasters/v3";
-var TOKEN_FILE = join(homedir(), ".alchemyagent", "google-token.json");
+var TOKEN_FILE = join2(homedir2(), ".alchemyagent", "google-token.json");
 var GSC_SETUP_HELP = [
   "Search Console needs your own Google credentials (they stay on your computer and are only sent to Google). Pick one:",
   "",
@@ -71,6 +810,7 @@ async function serviceAccountToken(file, f) {
   return { token: body.access_token, exp: Date.now() + (body.expires_in - 60) * 1e3 };
 }
 async function accessToken(creds, f = fetch) {
+  if (creds.getToken) return creds.getToken();
   const key = creds.serviceAccountFile ?? creds.clientId ?? "";
   if (cached && cached.key === key && cached.exp > Date.now()) return cached.token;
   if (creds.serviceAccountFile) {
@@ -144,9 +884,9 @@ async function startConnect(creds, f = fetch, open = openBrowser) {
         const r = await f(TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code: u.searchParams.get("code") ?? "", client_id: creds.clientId, client_secret: creds.clientSecret, redirect_uri: redirect, code_verifier: verifier }) });
         const body = await r.json();
         if (!r.ok || !body.refresh_token) throw new Error(body.error_description ?? body.error ?? "no refresh token");
-        await mkdir(join(homedir(), ".alchemyagent"), { recursive: true, mode: 448 });
+        await mkdir2(join2(homedir2(), ".alchemyagent"), { recursive: true, mode: 448 });
         const saved = { refresh_token: body.refresh_token, client_id: creds.clientId, scope: SCOPE, saved_at: (/* @__PURE__ */ new Date()).toISOString() };
-        await writeFile(TOKEN_FILE, JSON.stringify(saved, null, 2), { mode: 384 });
+        await writeFile2(TOKEN_FILE, JSON.stringify(saved, null, 2), { mode: 384 });
         await chmod(TOKEN_FILE, 384);
         cached = { token: body.access_token, exp: Date.now() + (body.expires_in - 60) * 1e3, key: creds.clientId };
         finish(200, "Google is connected (Search Console and GA4, read-only). You can close this tab and go back to Claude.");
@@ -164,7 +904,7 @@ async function startConnect(creds, f = fetch, open = openBrowser) {
   return { url, alreadyPending: false };
 }
 async function hasScope(creds, scope) {
-  if (creds.serviceAccountFile) return true;
+  if (creds.serviceAccountFile || creds.getToken) return true;
   const saved = await loadSaved();
   return !!saved && saved.client_id === creds.clientId && saved.scope.split(" ").includes(scope);
 }
@@ -246,31 +986,6 @@ __export(cflogs_exports, {
   logReport: () => logReport,
   matchBot: () => matchBot
 });
-
-// src/bots.ts
-var BOTS = [
-  { token: "GPTBot", owner: "OpenAI", purpose: "Model training", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.1; +https://openai.com/gptbot", ipList: "https://openai.com/gptbot.json" },
-  { token: "OAI-SearchBot", owner: "OpenAI", purpose: "ChatGPT search index", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot", ipList: "https://openai.com/searchbot.json" },
-  { token: "ChatGPT-User", owner: "OpenAI", purpose: "Live fetch when a ChatGPT user asks", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot", ipList: "https://openai.com/chatgpt-user.json" },
-  { token: "ClaudeBot", owner: "Anthropic", purpose: "Model training", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)" },
-  { token: "Claude-SearchBot", owner: "Anthropic", purpose: "Claude search index" },
-  { token: "Claude-User", owner: "Anthropic", purpose: "Live fetch when a Claude user asks" },
-  { token: "PerplexityBot", owner: "Perplexity", purpose: "Perplexity search index", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)", ipList: "https://www.perplexity.com/perplexitybot.json" },
-  { token: "Perplexity-User", owner: "Perplexity", purpose: "Live fetch when a Perplexity user asks", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)", ipList: "https://www.perplexity.com/perplexity-user.json" },
-  { token: "Googlebot", owner: "Google", purpose: "Google Search, AI Overviews and AI Mode", ua: "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", ipList: "https://developers.google.com/static/search/apis/ipranges/googlebot.json" },
-  { token: "Google-Extended", owner: "Google", purpose: "robots.txt opt-out for Gemini training and grounding (no separate crawler)" },
-  { token: "Bingbot", owner: "Microsoft", purpose: "Bing Search and Copilot", ua: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/116.0.1938.76 Safari/537.36", ipList: "https://www.bing.com/toolbox/bingbot.json" },
-  { token: "Applebot", owner: "Apple", purpose: "Siri and Spotlight search" },
-  { token: "Applebot-Extended", owner: "Apple", purpose: "robots.txt opt-out for Apple Intelligence training (no separate crawler)" },
-  { token: "CCBot", owner: "Common Crawl", purpose: "Open web dataset widely used for training" },
-  { token: "Meta-ExternalAgent", owner: "Meta", purpose: "Model training" },
-  { token: "Amazonbot", owner: "Amazon", purpose: "Alexa and Amazon AI" },
-  { token: "Bytespider", owner: "ByteDance", purpose: "Model training" },
-  { token: "DuckAssistBot", owner: "DuckDuckGo", purpose: "DuckAssist AI answers" },
-  { token: "MistralAI-User", owner: "Mistral", purpose: "Live fetch when a Le Chat user asks" }
-];
-
-// src/cflogs.ts
 var API2 = "https://api.cloudflare.com/client/v4";
 var CF_TOKEN_HELP = "Log file analysis needs your own Cloudflare API token, and the site's DNS must be proxied through Cloudflare. In Cloudflare: My Profile > API Tokens > Create Token > Custom token, with permissions Zone > Analytics > Read and Zone > Zone > Read (add Account > Account Analytics > Read to include Cloudflare Web Analytics visits). Then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The token stays on your computer and is only sent to Cloudflare.";
 var CfError = class extends Error {
@@ -410,7 +1125,7 @@ async function logReport(f, token, input, days = 30) {
 }
 var n2 = (x) => x.toLocaleString("en-US");
 var pct = (a, b) => b ? `${Math.round(a / b * 100)}%` : "\u2013";
-var cell = (s) => s.replace(/\|/g, "\\|").slice(0, 80);
+var cell2 = (s) => s.replace(/\|/g, "\\|").slice(0, 80);
 function logMarkdown(r, analytics) {
   const L = [];
   L.push(`# Log file analysis for AI search: ${r.host}`, "");
@@ -441,12 +1156,12 @@ function logMarkdown(r, analytics) {
   if (findings.length) L.push("## What stands out", "", ...findings.map((x) => `- ${x}`), "");
   if (r.aiPages.length) {
     L.push("## Pages AI bots read most", "", "Compare this with the pages you want cited. A page that never appears here can't be quoted.", "", "| Page | Requests |", "|---|---:|");
-    for (const p of r.aiPages) L.push(`| ${cell(p.path)} | ${n2(p.requests)} |`);
+    for (const p of r.aiPages) L.push(`| ${cell2(p.path)} | ${n2(p.requests)} |`);
     L.push("");
   }
   if (r.botErrors.length) {
     L.push("## Errors served to verified bots", "", "| Page | Status | Requests |", "|---|---:|---:|");
-    for (const e of r.botErrors) L.push(`| ${cell(e.path)} | ${e.status} | ${n2(e.requests)} |`);
+    for (const e of r.botErrors) L.push(`| ${cell2(e.path)} | ${e.status} | ${n2(e.requests)} |`);
     L.push("");
   }
   L.push("## Logs vs analytics", "");
@@ -467,7 +1182,7 @@ __export(entitymap_exports, {
   entitymapMarkdown: () => entitymapMarkdown,
   validateEntityMap: () => validateEntityMap
 });
-var UA = "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)";
+var UA2 = "Mozilla/5.0 (compatible; AlchemyAgent/0.3; +https://alchemyagent.ai)";
 var CORE_TYPES = /* @__PURE__ */ new Set(["Concept", "ProprietaryTerm", "Methodology", "Metric", "Taxonomy", "Person", "Organization", "SoftwareProduct", "PhysicalProduct", "Service", "Platform", "Place", "Event", "Standard", "Regulation"]);
 var TIER1 = ["INSTANCE_OF", "PART_OF", "INCLUDES", "DEPENDS_ON", "REQUIRES", "MEASURES", "PRODUCED_BY", "REGULATED_BY", "AUTHORED_BY", "AFFILIATED_WITH", "COVERS"];
 var TIER2 = ["RELATES_TO", "PRECEDES", "ENABLES", "PREVENTS", "CONFLICTS_WITH", "DESCRIBED_BY", "OFFERS"];
@@ -602,11 +1317,11 @@ function checkHtml(html, pubName) {
     { ok: !/<meta\b[^>]*name=["']?robots["']?[^>]*noindex/i.test(html), label: "No noindex" }
   ];
 }
-async function get(f, url) {
+async function get2(f, url) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 2e4);
   try {
-    const r = await f(url, { headers: { "user-agent": UA, accept: "application/json, text/html;q=0.9" }, redirect: "follow", signal: ctl.signal });
+    const r = await f(url, { headers: { "user-agent": UA2, accept: "application/json, text/html;q=0.9" }, redirect: "follow", signal: ctl.signal });
     return { status: r.status, text: await r.text() };
   } catch {
     return { status: 0, text: "" };
@@ -621,23 +1336,23 @@ async function entitymapCheck(input, f = fetch, jsonText) {
   } catch {
   }
   const jsonUrl = origin ? `${origin}/entitymap.json` : "(pasted JSON)";
-  let text = jsonText, status;
-  if (!text) {
-    const r = await get(f, jsonUrl);
+  let text2 = jsonText, status;
+  if (!text2) {
+    const r = await get2(f, jsonUrl);
     status = r.status;
     if (r.status !== 200) return { jsonUrl, found: false, status: r.status, entities: 0, chunks: 0, relations: 0, issues: [] };
-    text = r.text;
+    text2 = r.text;
   }
   let doc;
   try {
-    doc = JSON.parse(text);
+    doc = JSON.parse(text2);
   } catch (e) {
     return { jsonUrl, found: true, status, entities: 0, chunks: 0, relations: 0, issues: [{ level: "error", path: "root", msg: `Not valid JSON (${e.message}).` }] };
   }
   const v = validateEntityMap(doc);
   const res = { jsonUrl, found: true, status, ...v, generated: doc.generated, verificationStatus: doc.verificationStatus };
   if (origin) {
-    const h = await get(f, `${origin}/entitymap.html`);
+    const h = await get2(f, `${origin}/entitymap.html`);
     res.html = { url: `${origin}/entitymap.html`, status: h.status, checks: h.status === 200 ? checkHtml(h.text, String(doc?.publisher?.name ?? "")) : [] };
   }
   return res;
@@ -680,7 +1395,7 @@ __export(images_exports, {
   imageAudit: () => imageAudit,
   imageMarkdown: () => imageMarkdown
 });
-var UA2 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 AlchemyAgent/0.3";
+var UA3 = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 AlchemyAgent/0.3";
 var KB = 1024;
 var attr = (tag, name) => {
   const m = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
@@ -750,7 +1465,7 @@ async function measure(f, img) {
   const t = setTimeout(() => ctl.abort(), 2e4);
   try {
     const isSvg = /\.svg(\?|#|$)/i.test(img.url);
-    const res = await f(img.url, { method: img.kind === "video" ? "HEAD" : "GET", headers: { "user-agent": UA2, accept: "image/avif,image/webp,image/*,*/*;q=0.8" }, redirect: "follow", signal: ctl.signal });
+    const res = await f(img.url, { method: img.kind === "video" ? "HEAD" : "GET", headers: { "user-agent": UA3, accept: "image/avif,image/webp,image/*,*/*;q=0.8" }, redirect: "follow", signal: ctl.signal });
     img.status = res.status;
     img.type = (res.headers.get("content-type") ?? "").split(";")[0].trim();
     if (img.kind === "video") {
@@ -762,10 +1477,10 @@ async function measure(f, img) {
       return;
     }
     if (isSvg || img.type === "image/svg+xml") {
-      const text = await res.text();
-      img.bytes = new TextEncoder().encode(text).length;
+      const text2 = await res.text();
+      img.bytes = new TextEncoder().encode(text2).length;
       let emb = 0;
-      for (const m of text.matchAll(/data:image\/(?:png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)/g)) emb += Math.floor(m[1].replace(/\s/g, "").length * 3 / 4);
+      for (const m of text2.matchAll(/data:image\/(?:png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)/g)) emb += Math.floor(m[1].replace(/\s/g, "").length * 3 / 4);
       if (emb) img.embeddedRasterBytes = emb;
     } else {
       img.bytes = (await res.arrayBuffer()).byteLength;
@@ -776,7 +1491,7 @@ async function measure(f, img) {
     clearTimeout(t);
   }
 }
-var fmt = (b) => b == null ? "?" : b >= KB * KB ? `${(b / KB / KB).toFixed(1)} MB` : `${Math.round(b / KB)} KB`;
+var fmt2 = (b) => b == null ? "?" : b >= KB * KB ? `${(b / KB / KB).toFixed(1)} MB` : `${Math.round(b / KB)} KB`;
 var short = (u) => {
   try {
     const x = new URL(u);
@@ -789,7 +1504,7 @@ async function imageAudit(input, f = fetch, maxImages = 40) {
   const url = /^https?:\/\//i.test(input) ? input : `https://${input}`;
   let res;
   try {
-    res = await f(url, { headers: { "user-agent": UA2, accept: "text/html" }, redirect: "follow" });
+    res = await f(url, { headers: { "user-agent": UA3, accept: "text/html" }, redirect: "follow" });
   } catch {
     throw new Error(`Couldn't load ${url}.`);
   }
@@ -811,21 +1526,21 @@ async function imageAudit(input, f = fetch, maxImages = 40) {
     "Photos hidden inside SVG files",
     "These .svg files wrap a base64 PNG or JPEG. They can't be compressed, cached or resized like real images, and they're often several MB. Export each as WebP (or AVIF) and point the page at that file.",
     page.filter((i) => (i.embeddedRasterBytes ?? 0) > 20 * KB),
-    (i) => `${short(i.url)}: ${fmt(i.bytes)} (${fmt(i.embeddedRasterBytes)} of embedded raster)`
+    (i) => `${short(i.url)}: ${fmt2(i.bytes)} (${fmt2(i.embeddedRasterBytes)} of embedded raster)`
   );
   const first = page.find((i) => i.kind === "img");
   if (first && first.loading === "lazy") findings.push({ severity: 1, title: "The first image is lazy-loaded", detail: 'The first image is usually the hero and the Largest Contentful Paint element. Lazy-loading it delays LCP. Use loading="eager" and fetchpriority="high" on it.', items: [short(first.url)] });
-  push(1, "Autoplay videos without a poster image", "Without a poster, the browser shows nothing until the video downloads, and the video itself becomes the LCP element. Add a lightweight WebP poster.", images.filter((i) => i.kind === "video" && i.autoplay && !i.hasPoster), (i) => i.url ? `${short(i.url)}${i.bytes ? ` (${fmt(i.bytes)})` : ""}` : "inline <video> with no src");
-  push(2, "Heavy images (over 200 KB)", "Resize to the largest size the layout actually shows (usually under 2000 px wide) and compress. Most photos land under 150 KB as WebP.", page.filter((i) => (i.bytes ?? 0) > 200 * KB && !i.embeddedRasterBytes).sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0)), (i) => `${short(i.url)}: ${fmt(i.bytes)}`);
-  push(2, "JPG, PNG or GIF that should be WebP or AVIF", "WebP is typically 25\u201335% smaller than JPEG at the same quality, and every current browser supports it.", page.filter((i) => /image\/(jpeg|png|gif)/.test(i.type ?? "") && (i.bytes ?? 0) > 50 * KB), (i) => `${short(i.url)} (${i.type?.replace("image/", "")}, ${fmt(i.bytes)})`);
-  push(2, "Large images without srcset", "Phones download the full desktop file. Add srcset and sizes so each device gets a right-sized version (WordPress does this automatically for images inserted from the media library).", page.filter((i) => i.kind === "img" && !i.srcset && (i.bytes ?? 0) > 100 * KB && !/svg/.test(i.type ?? "")), (i) => `${short(i.url)}: ${fmt(i.bytes)}`);
+  push(1, "Autoplay videos without a poster image", "Without a poster, the browser shows nothing until the video downloads, and the video itself becomes the LCP element. Add a lightweight WebP poster.", images.filter((i) => i.kind === "video" && i.autoplay && !i.hasPoster), (i) => i.url ? `${short(i.url)}${i.bytes ? ` (${fmt2(i.bytes)})` : ""}` : "inline <video> with no src");
+  push(2, "Heavy images (over 200 KB)", "Resize to the largest size the layout actually shows (usually under 2000 px wide) and compress. Most photos land under 150 KB as WebP.", page.filter((i) => (i.bytes ?? 0) > 200 * KB && !i.embeddedRasterBytes).sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0)), (i) => `${short(i.url)}: ${fmt2(i.bytes)}`);
+  push(2, "JPG, PNG or GIF that should be WebP or AVIF", "WebP is typically 25\u201335% smaller than JPEG at the same quality, and every current browser supports it.", page.filter((i) => /image\/(jpeg|png|gif)/.test(i.type ?? "") && (i.bytes ?? 0) > 50 * KB), (i) => `${short(i.url)} (${i.type?.replace("image/", "")}, ${fmt2(i.bytes)})`);
+  push(2, "Large images without srcset", "Phones download the full desktop file. Add srcset and sizes so each device gets a right-sized version (WordPress does this automatically for images inserted from the media library).", page.filter((i) => i.kind === "img" && !i.srcset && (i.bytes ?? 0) > 100 * KB && !/svg/.test(i.type ?? "")), (i) => `${short(i.url)}: ${fmt2(i.bytes)}`);
   push(3, "Missing width and height", "Without dimensions the layout jumps as images load (Cumulative Layout Shift).", page.filter((i) => i.kind === "img" && (!i.width || !i.height)), (i) => short(i.url));
   push(3, "Below-the-fold images not lazy-loaded", `Images after the first few should use loading="lazy" so they don't compete with the hero.`, page.filter((i) => i.kind === "img" && i.index > 3 && i.loading !== "lazy"), (i) => short(i.url));
   push(3, "Missing alt text", 'Alt text is how screen readers and AI systems understand an image. Describe what it shows; use alt="" only for decoration.', page.filter((i) => i.kind === "img" && i.alt == null), (i) => short(i.url));
   push(3, "Broken images", "These image URLs didn't load.", images.filter((i) => i.url && i.status != null && i.status !== 0 && i.status >= 400), (i) => `${short(i.url)} (HTTP ${i.status})`);
   const og = images.find((i) => i.kind === "og");
   if (!og) findings.push({ severity: 3, title: "No og:image", detail: "Links shared in Slack, LinkedIn and chat apps show no preview image. Add a 1200x630 og:image.", items: [] });
-  else if ((og.bytes ?? 0) > 600 * KB) findings.push({ severity: 3, title: "Heavy share image", detail: "Some platforms skip og:images over a few hundred KB or time out fetching them.", items: [`${short(og.url)}: ${fmt(og.bytes)}`] });
+  else if ((og.bytes ?? 0) > 600 * KB) findings.push({ severity: 3, title: "Heavy share image", detail: "Some platforms skip og:images over a few hundred KB or time out fetching them.", items: [`${short(og.url)}: ${fmt2(og.bytes)}`] });
   findings.sort((a, b) => a.severity - b.severity);
   return { url: res.url || url, status: res.status, images, totalBytes, findings };
 }
@@ -833,7 +1548,7 @@ function imageMarkdown(a, maxItems = 8) {
   const L = [`# Image audit: ${a.url}`, ""];
   const imgs = a.images.filter((i) => i.kind !== "og" && i.kind !== "video" && i.status !== -1);
   const biggest = [...imgs].sort((x, y) => (y.bytes ?? 0) - (x.bytes ?? 0))[0];
-  L.push(`- ${imgs.length} images found in the HTML, ${fmt(a.totalBytes)} in total${biggest?.bytes ? `; the largest is ${short(biggest.url)} at ${fmt(biggest.bytes)}` : ""}`);
+  L.push(`- ${imgs.length} images found in the HTML, ${fmt2(a.totalBytes)} in total${biggest?.bytes ? `; the largest is ${short(biggest.url)} at ${fmt2(biggest.bytes)}` : ""}`);
   const vids = a.images.filter((i) => i.kind === "video");
   if (vids.length) L.push(`- ${vids.length} video${vids.length === 1 ? "" : "s"}${vids.some((v) => v.autoplay) ? " (autoplay)" : ""}`);
   L.push("- Counts only what's in the page HTML. Images added later by JavaScript or CSS backgrounds aren't included; use pagespeed_check for the full picture.", "");
@@ -867,23 +1582,23 @@ __export(featured_exports, {
 });
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { join as join2, resolve } from "node:path";
-var esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-var fmt2 = (v) => Number.isInteger(v) ? v.toLocaleString("en-US") : v.toLocaleString("en-US", { maximumFractionDigits: 1 });
+import { mkdir as mkdir3, readFile as readFile2, writeFile as writeFile3 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { join as join3, resolve } from "node:path";
+var esc2 = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+var fmt3 = (v) => Number.isInteger(v) ? v.toLocaleString("en-US") : v.toLocaleString("en-US", { maximumFractionDigits: 1 });
 var font = (f) => f.trim().replace(/ /g, "+");
 function cardHtml(c, accent) {
-  const title = c.title ? `<h3>${esc(c.title)}</h3>` : "";
-  const foot = (f) => f ? `<div class="foot"><span class="big" style="color:${accent}">${esc(f.value)}</span><span>${esc(f.text)}</span></div>` : "";
+  const title = c.title ? `<h3>${esc2(c.title)}</h3>` : "";
+  const foot = (f) => f ? `<div class="foot"><span class="big" style="color:${accent}">${esc2(f.value)}</span><span>${esc2(f.text)}</span></div>` : "";
   if (c.type === "bars") {
     const max = Math.max(...c.rows.map((r) => r.value), 1);
     const colors = [accent, "#f98600", "#e8e8e8", "#9ad1ff", "#b9f6ca"];
     const dense = c.rows.length + (c.footer ? 1 : 0) >= 5;
-    return title + c.rows.slice(0, 5).map((r, i) => `<div class="bar${dense ? " dense" : ""}"><div class="bl"><span><b>${esc(r.label)}</b>${r.note ? ` <i>\xB7 ${esc(r.note)}</i>` : ""}</span><b class="num">${fmt2(r.value)}</b></div><div class="track"><div style="width:${Math.max(r.value / max * 100, 1.6).toFixed(1)}%;background:${colors[i % colors.length]}"></div></div></div>`).join("") + foot(c.footer);
+    return title + c.rows.slice(0, 5).map((r, i) => `<div class="bar${dense ? " dense" : ""}"><div class="bl"><span><b>${esc2(r.label)}</b>${r.note ? ` <i>\xB7 ${esc2(r.note)}</i>` : ""}</span><b class="num">${fmt3(r.value)}</b></div><div class="track"><div style="width:${Math.max(r.value / max * 100, 1.6).toFixed(1)}%;background:${colors[i % colors.length]}"></div></div></div>`).join("") + foot(c.footer);
   }
   if (c.type === "stats") {
-    return title + `<div class="stats">${c.rows.slice(0, 4).map((r) => `<div><span class="big" style="color:${accent}${r.value.length > 9 ? ";font-size:28px" : ""}">${esc(r.value)}</span><span>${esc(r.label)}</span></div>`).join("")}</div>`;
+    return title + `<div class="stats">${c.rows.slice(0, 4).map((r) => `<div><span class="big" style="color:${accent}${r.value.length > 9 ? ";font-size:28px" : ""}">${esc2(r.value)}</span><span>${esc2(r.label)}</span></div>`).join("")}</div>`;
   }
   if (c.type === "before_after") {
     const W = 492, x0 = 150, x1 = 480, rows = c.rows.slice(0, 7);
@@ -894,18 +1609,18 @@ function cardHtml(c, accent) {
     for (let v = c.min; v <= c.max; v += step) svg += `<line x1="${X(v)}" y1="0" x2="${X(v)}" y2="${H}" stroke="#262626"/><text x="${X(v)}" y="${H + 20}" fill="#8a8a8a" font-size="13" text-anchor="middle">${v}</text>`;
     rows.forEach((r, i) => {
       const y = 20 + i * 42;
-      svg += `<text x="0" y="${y + 5}" fill="#e6e6e6" font-size="15">${esc(r.label)}</text><line x1="${X(r.before)}" y1="${y}" x2="${X(r.after)}" y2="${y}" stroke="${accent}" stroke-width="4"/><circle cx="${X(r.before)}" cy="${y}" r="8" fill="#6b6b6b"/><circle cx="${X(r.after)}" cy="${y}" r="9" fill="${accent}"/>`;
+      svg += `<text x="0" y="${y + 5}" fill="#e6e6e6" font-size="15">${esc2(r.label)}</text><line x1="${X(r.before)}" y1="${y}" x2="${X(r.after)}" y2="${y}" stroke="${accent}" stroke-width="4"/><circle cx="${X(r.before)}" cy="${y}" r="8" fill="#6b6b6b"/><circle cx="${X(r.after)}" cy="${y}" r="9" fill="${accent}"/>`;
     });
     return title + svg + "</svg>" + foot(c.footer);
   }
-  return title + `<ul class="list">${c.rows.slice(0, 6).map((r) => `<li><span style="background:${accent}"></span>${esc(r)}</li>`).join("")}</ul>`;
+  return title + `<ul class="list">${c.rows.slice(0, 6).map((r) => `<li><span style="background:${accent}"></span>${esc2(r)}</li>`).join("")}</ul>`;
 }
 async function featuredHtml(s) {
   const bg = s.background ?? "#ffc61a", ink = s.ink ?? "#111111", accent = s.accent ?? bg;
   const hf = s.headingFont ?? "Days One", bf = s.bodyFont ?? "DM Sans";
-  let logo = s.brand ? `<div class="brand">${esc(s.brand)}</div>` : "";
+  let logo = s.brand ? `<div class="brand">${esc2(s.brand)}</div>` : "";
   if (s.logoSvg) {
-    const svg = await readFile2(resolve(s.logoSvg.replace(/^~(?=\/)/, homedir2())), "utf8");
+    const svg = await readFile2(resolve(s.logoSvg.replace(/^~(?=\/)/, homedir3())), "utf8");
     logo = `<div class="logo">${svg.replace(/<\?xml[^>]*>/, "")}</div>`;
   }
   const long = s.headline.length > 42;
@@ -933,10 +1648,10 @@ h1{font-family:'${hf}',sans-serif;font-weight:400;font-size:${long ? 40 : 46}px;
 .list{list-style:none;margin-top:6px}.list li{display:flex;gap:12px;align-items:center;font-size:18px;margin:0 0 18px}.list li span{width:10px;height:10px;border-radius:50%;flex:none}
 .src{position:absolute;left:64px;bottom:40px;font-size:14px;font-weight:500;opacity:.8}
 .url{position:absolute;right:64px;bottom:40px;font:700 14px '${bf}'}
-</style></head><body><div class="rings"></div><div class="pix"></div>${logo}${s.eyebrow ? `<div class="eyebrow">${esc(s.eyebrow)}</div>` : ""}
-<div class="left"><h1>${esc(s.headline)}</h1>${s.subhead ? `<p class="sub">${esc(s.subhead)}</p>` : ""}</div>
+</style></head><body><div class="rings"></div><div class="pix"></div>${logo}${s.eyebrow ? `<div class="eyebrow">${esc2(s.eyebrow)}</div>` : ""}
+<div class="left"><h1>${esc2(s.headline)}</h1>${s.subhead ? `<p class="sub">${esc2(s.subhead)}</p>` : ""}</div>
 <div class="card">${cardHtml(s.card, accent === bg && /^#?f/i.test(bg) ? bg : accent)}</div>
-${s.source ? `<div class="src">${esc(s.source)}</div>` : ""}${s.site ? `<div class="url">${esc(s.site)}</div>` : ""}</body></html>`;
+${s.source ? `<div class="src">${esc2(s.source)}</div>` : ""}${s.site ? `<div class="url">${esc2(s.site)}</div>` : ""}</body></html>`;
 }
 var CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -972,24 +1687,26 @@ function findChrome() {
   return c.find((p) => p && existsSync(p)) ?? null;
 }
 async function renderFeatured(spec, outDir, name = "featured", credit = true) {
-  const dir = resolve((outDir ?? join2(homedir2(), "Downloads", "alchemyagent-images")).replace(/^~(?=\/)/, homedir2()));
-  await mkdir2(dir, { recursive: true });
+  const dir = resolve((outDir ?? join3(homedir3(), "Downloads", "alchemyagent-images")).replace(/^~(?=\/)/, homedir3()));
+  await mkdir3(dir, { recursive: true });
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "featured";
-  const html = join2(dir, `${slug}.html`), png = join2(dir, `${slug}.png`);
-  await writeFile2(html, await featuredHtml(spec), "utf8");
+  const html = join3(dir, `${slug}.html`), png = join3(dir, `${slug}.png`);
+  await writeFile3(html, await featuredHtml(spec), "utf8");
   const chrome = findChrome();
   if (!chrome) return { html, note: "No Chrome, Edge, Chromium or Brave found, so only the HTML was written. Open it in a browser at 1200x630 and screenshot it, or install Chrome and run again." };
   await new Promise((ok) => execFile(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2", "--window-size=1200,630", "--virtual-time-budget=5000", `--screenshot=${png}`, `file://${html}`], { timeout: 6e4 }, () => ok()));
   if (!existsSync(png)) return { html, note: `Chrome didn't produce a screenshot. The HTML is at ${html}.` };
-  if (credit) await writeFile2(png, addPngText(await readFile2(png), CREDIT));
+  if (credit) await writeFile3(png, addPngText(await readFile2(png), CREDIT));
   return { html, png };
 }
 
 // src/connections.ts
 var connections_exports = {};
 __export(connections_exports, {
+  ACCOUNT_NEEDED: () => ACCOUNT_NEEDED,
   connState: () => connState,
-  connectionsMarkdown: () => connectionsMarkdown
+  connectionsMarkdown: () => connectionsMarkdown,
+  hostedConnectionsMarkdown: () => hostedConnectionsMarkdown
 });
 import { existsSync as existsSync2 } from "node:fs";
 function connState(o, tokenFile) {
@@ -1048,6 +1765,37 @@ function connectionsMarkdown(s) {
   }
   const next = rows.find((r) => !r[1]);
   if (next) L.push(`**Start with:** ${next[0]}.`);
+  return L.join("\n").trimEnd();
+}
+var ACCOUNT_NEEDED = [
+  "# Connect your own data",
+  "",
+  "This free connector only checks public pages, so it has no account to hold your connections.",
+  "Your own Google Search Console, GA4 and Bing Webmaster Tools data needs an AlchemyAgent account: use the signed-in connector (https://mcp.alchemyagent.ai/pro/mcp), the AlchemyAgent app for Claude, Slack or WordPress, or see https://alchemyagent.ai.",
+  "",
+  "- Google Search Console: your real Google queries, clicks and positions, including AI-assistant queries.",
+  "- Google Analytics 4 (same Google sign-in): sessions and key events by channel and landing page, including AI referrals.",
+  "- Bing Webmaster Tools: Bing traffic, queries and index health. Bing's index also feeds Microsoft Copilot."
+].join("\n");
+function hostedConnectionsMarkdown(s, link) {
+  const since = (d) => d ? ` (since ${d.slice(0, 10)})` : "";
+  const rows = [
+    ["Google Search Console", s.google.connected, "Your real Google queries, clicks, impressions and positions, and which queries come from AI assistants. Fixes get ranked by what actually earns traffic.", since(s.google.since)],
+    ["Google Analytics 4", s.google.connected, "Sessions, key events and revenue by channel and landing page, including referrals from ChatGPT, Perplexity, Claude, Gemini and Copilot.", since(s.google.since)],
+    ["Bing Webmaster Tools", s.bing.connected, "Bing traffic, top queries and pages, index and crawl errors. Bing's index also feeds Microsoft Copilot and other AI assistants.", since(s.bing.since)]
+  ];
+  const on = rows.filter((r) => r[1]).length;
+  const L = [
+    `# Your data connections: ${on} of ${rows.length} connected`,
+    "",
+    "Every public-site check works without these. Connecting your own data lets AlchemyAgent rank fixes by real traffic and real queries. Access is read-only, tokens are encrypted at rest, and you can disconnect any source on the same page.",
+    ""
+  ];
+  for (const [name, ok, why, when] of rows) L.push(`## ${ok ? "\u2713" : "\u25CB"} ${name}${ok ? `: connected${when ?? ""}` : ""}`, why, "");
+  if (!s.google.connected) L.push(s.googleAvailable ? "Google: one sign-in connects Search Console and GA4 together (read-only)." : "Google: the Search Console and GA4 sign-in is opening soon. Bing can be connected now.");
+  if (!s.bing.connected) L.push("Bing: paste a Bing Webmaster Tools API key (Bing Webmaster Tools > Settings > API access > API key) on the same page.");
+  L.push("", `**${on === rows.length ? "Manage or disconnect" : "Connect"} here (private link for this account, valid 24 hours):** ${link}`);
+  if (on) L.push("", "Then try: gsc_performance, gsc_ai_queries, ga4_report or bing_webmaster.");
   return L.join("\n").trimEnd();
 }
 
@@ -1168,19 +1916,33 @@ function propertiesMarkdown(props) {
 var bing_exports = {};
 __export(bing_exports, {
   BING_KEY_HELP: () => BING_KEY_HELP,
+  BING_KEY_STEPS: () => BING_KEY_STEPS,
   BingError: () => BingError,
   bingDate: () => bingDate,
   bingMarkdown: () => bingMarkdown,
   bingReport: () => bingReport,
+  isThrottle: () => isThrottle,
   listSites: () => listSites2,
   matchSite: () => matchSite,
   sitesMarkdown: () => sitesMarkdown
 });
 var BASE = "https://ssl.bing.com/webmaster/api.svc/json/";
+var BING_KEY_STEPS = "In Bing Webmaster Tools (https://www.bing.com/webmasters), open Settings (the gear) > API access > API key and generate a key.";
 var BING_KEY_HELP = "Bing Webmaster Tools needs your own API key. In Bing Webmaster Tools (https://www.bing.com/webmasters), open Settings (the gear) > API access > API key, generate a key, then paste it into AlchemyAgent's settings in Claude (Settings > Extensions > AlchemyAgent > Configure). The key stays on your computer and is only sent to Bing.";
 var BingError = class extends Error {
 };
-async function call2(f, key, method, params = {}) {
+var isThrottle = (e) => /Throttle/i.test(String(e?.message ?? e));
+async function call2(f, key, method, params = {}, waits = [1500, 4e3]) {
+  for (let i = 0; ; i++) {
+    try {
+      return await callOnce(f, key, method, params);
+    } catch (e) {
+      if (!isThrottle(e) || i >= waits.length) throw e;
+      await new Promise((r) => setTimeout(r, waits[i]));
+    }
+  }
+}
+async function callOnce(f, key, method, params) {
   const q = new URLSearchParams({ ...params, apikey: key });
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 2e4);
@@ -1196,6 +1958,7 @@ async function call2(f, key, method, params = {}) {
   if (!res.ok || !body || body.ErrorCode) {
     const msg = body?.Message ? String(body.Message) : `HTTP ${res.status}`;
     if (res.status === 401 || /api ?key|unauthori[sz]ed|InvalidApiKey/i.test(msg)) throw new BingError(`Bing rejected the API key (${msg}). ${BING_KEY_HELP}`);
+    if (/Throttle/i.test(msg)) throw new BingError(`Bing is rate-limiting requests right now (Throttle). Try again in a few minutes.`);
     throw new BingError(`Bing Webmaster API ${method} failed: ${msg}`);
   }
   return body.d;
@@ -1248,7 +2011,7 @@ function aggregate(rows) {
 async function bingReport(f, key, siteUrl, sections) {
   const p = { siteUrl };
   const want = new Set(sections);
-  const [traffic, queries, pages, crawl, quota] = await Promise.all([
+  const [traffic, queries, pages, crawl2, quota] = await Promise.all([
     want.has("traffic") ? call2(f, key, "GetRankAndTrafficStats", p) : null,
     want.has("queries") ? call2(f, key, "GetQueryStats", p) : null,
     want.has("pages") ? call2(f, key, "GetPageStats", p) : null,
@@ -1267,8 +2030,8 @@ async function bingReport(f, key, siteUrl, sections) {
   }
   if (queries) out.queries = aggregate(queries);
   if (pages) out.pages = aggregate(pages);
-  if (crawl) {
-    const rows = [...crawl].sort((a, b) => bingDate(a.Date).localeCompare(bingDate(b.Date)));
+  if (crawl2) {
+    const rows = [...crawl2].sort((a, b) => bingDate(a.Date).localeCompare(bingDate(b.Date)));
     const r = rows[rows.length - 1];
     out.crawl = r ? {
       date: bingDate(r.Date),
@@ -1336,6 +2099,18 @@ function bingMarkdown(r, limit = 15) {
 
 export {
   BOTS,
+  parseRobots,
+  rulesFor,
+  isAllowed,
+  get,
+  challenged,
+  crawlerCheck,
+  crawlerMarkdown,
+  norm,
+  runLinks,
+  saveLinkFiles,
+  linksMarkdown,
+  links_exports,
   GA4_SCOPE,
   TOKEN_FILE,
   startConnect,
@@ -1361,6 +2136,8 @@ export {
   featured_exports,
   connState,
   connectionsMarkdown,
+  ACCOUNT_NEEDED,
+  hostedConnectionsMarkdown,
   connections_exports,
   listProperties,
   matchGa4,
